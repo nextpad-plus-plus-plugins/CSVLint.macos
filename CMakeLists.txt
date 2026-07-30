@@ -13,6 +13,8 @@ set(NPP_PLUGIN_INCLUDE "${NPP_MACOS_DIR}/src")
 add_library(CSVLint SHARED
     src/PluginEntry.mm
     src/CsvLintPanel.mm
+    src/CsvLintDialogs.mm
+    src/engine/CsvEdit.cpp
     src/engine/CsvSchemaIni.cpp
     src/engine/CsvDefinition.cpp
     src/engine/CsvAnalyze.cpp
@@ -26,6 +28,7 @@ target_include_directories(CSVLint PRIVATE
     src/engine)
 target_link_libraries(CSVLint PRIVATE
     "-framework Cocoa")
+target_compile_options(CSVLint PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
 set_target_properties(CSVLint PROPERTIES PREFIX "" SUFFIX ".dylib")
 # Stamp version into the dylib Mach-O current_version (Plugins Admin reads it).
 target_link_options(CSVLint PRIVATE "-Wl,-current_version,${PROJECT_VERSION}")

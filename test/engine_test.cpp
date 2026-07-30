@@ -8,6 +8,7 @@
 #include "../src/engine/CsvAnalyze.h"
 #include "../src/engine/CsvValidate.h"
 #include "../src/engine/DateTimeMask.h"
+#include "../src/engine/CsvEdit.h"
 
 static int gFail = 0;
 #define CHECK(cond, msg) do { \
@@ -324,6 +325,106 @@ int main() {
         f.FieldWidths = {5, 4};
         CHECK(f.ConstructLine({"ab", "7"}, false) == "ab      7",
               "construct: fixed width pads text right, numbers left");
+    }
+
+    // ── CsvEdit: reformat ───────────────────────────────────────────────────
+    {
+        std::string err;
+        CsvDefinition d = CsvDefinition::FromIniLines(
+            "Format=Delimited(;)\nColNameHeader=True\nDateTimeFormat=d-m-yyyy\n"
+            "DecimalSymbol=,\nNumberDigits=1\n"
+            "Col1=Id Integer Width 2\nCol2=Amt Float Width 5\nCol3=When DateTime Width 10\n", &err);
+        std::string text = "Id;Amt;When\n1;2,5;23-4-2014\n2;10,0;1-12-2015\n";
+        std::string out = CsvEdit::ReformatDataFile(text, d, ",", true,
+                                                    "yyyy-MM-dd", ".", " ", false, "\n");
+        CHECK(out == "Id,Amt,When\n1,2.5,2014-04-23\n2,10.0,2015-12-01\n",
+              "edit: reformat separator+datetime+decimal");
+
+        // to fixed width: header line dropped, numeric right-aligned
+        CsvDefinition d2 = CsvDefinition::FromIniLines(
+            "Format=Delimited(;)\nColNameHeader=True\n"
+            "Col1=Id Integer Width 3\nCol2=Name Text Width 5\n", &err);
+        std::string t2 = "Id;Name\n1;ab\n23;cde\n";
+        std::string o2 = CsvEdit::ReformatDataFile(t2, d2, std::string(1, '\0'), true,
+                                                   "", "", " ", false, "\n");
+        CHECK(o2 == "  1ab   \n 23cde  \n", "edit: reformat to fixed width (no header)");
+    }
+
+    // ── CsvEdit: sort ───────────────────────────────────────────────────────
+    {
+        std::string err;
+        CsvDefinition d = CsvDefinition::FromIniLines(
+            "Format=CSVDelimited\nColNameHeader=True\n"
+            "Col1=N Integer Width 3\nCol2=T Text Width 5\n", &err);
+        std::string text = "N,T\n5,ee\n-2,bb\n10,cc\n-11,aa\n1,dd\n";
+        std::string asc = CsvEdit::SortData(text, d, 0, true, true, "\n", &err);
+        CHECK(err.empty() && asc == "N,T\n-11,aa\n-2,bb\n1,dd\n5,ee\n10,cc\n",
+              "edit: sort integer ascending incl. negatives");
+        std::string desc = CsvEdit::SortData(text, d, 0, false, true, "\n", &err);
+        CHECK(desc == "N,T\n10,cc\n5,ee\n1,dd\n-2,bb\n-11,aa\n",
+              "edit: sort integer descending");
+        std::string bylen = CsvEdit::SortData(text, d, 1, true, false, "\n", &err);
+        CHECK(bylen.find("N,T\n") == 0, "edit: sort by length keeps header");
+        std::string bad = CsvEdit::SortData(text, d, 9, true, true, "\n", &err);
+        CHECK(!err.empty() && bad == text, "edit: sort index out of bounds errors");
+    }
+
+    // ── CsvEdit: column split / add ─────────────────────────────────────────
+    {
+        std::string err;
+        CsvDefinition d = CsvDefinition::FromIniLines(
+            "Format=CSVDelimited\nColNameHeader=True\n"
+            "Col1=Code Text Width 7\nCol2=V Integer Width 2\n", &err);
+        std::string text = "Code,V\nAB-12,1\nCD-345,2\n";
+        CsvDefinition dnew;
+
+        // split on character '-' (1st occurrence)
+        std::string o4 = CsvEdit::ColumnSplit(text, d, 0, 4, "-", "1", false, "\n", dnew);
+        CHECK(o4 == "Code,Code (2),Code (3),V\nAB-12,AB,12,1\nCD-345,CD,345,2\n",
+              "edit: split on character keeps original + adds two");
+        CHECK(dnew.Fields.size() == 4 && dnew.Fields[1].Name == "Code (2)",
+              "edit: split adds uniquely named columns");
+
+        // split on position 2, remove original
+        std::string o5 = CsvEdit::ColumnSplit(text, d, 0, 5, "", "2", true, "\n", dnew);
+        CHECK(o5 == "Code (2),Code (3),V\nAB,-12,1\nCD,-345,2\n",
+              "edit: split on position with remove");
+
+        // search and replace (edit-only, one new column)
+        std::string o2 = CsvEdit::ColumnSplit(text, d, 0, 2, "-", "_", false, "\n", dnew);
+        CHECK(o2 == "Code,Code (2),V\nAB-12,AB_12,1\nCD-345,CD_345,2\n",
+              "edit: search-replace adds edited column");
+
+        // pad left to width 4 (edit-only)
+        CsvDefinition d2 = CsvDefinition::FromIniLines(
+            "Format=CSVDelimited\nColNameHeader=True\nCol1=K Text Width 4\n", &err);
+        std::string t2 = "K\n7\n42\n";
+        std::string o1 = CsvEdit::ColumnSplit(t2, d2, 0, 1, "0", "4", false, "\n", dnew);
+        CHECK(o1 == "K,K (2)\n7,0007\n42,0042\n", "edit: pad-left with zeros");
+    }
+
+    // ── CsvEdit: select columns ─────────────────────────────────────────────
+    {
+        std::string err;
+        CsvDefinition d = CsvDefinition::FromIniLines(
+            "Format=CSVDelimited\nColNameHeader=True\n"
+            "Col1=A Text Width 2\nCol2=B Text Width 2\nCol3=C Text Width 2\n", &err);
+        std::string text = "A,B,C\na1,b1,c1\na2,b2,c2\n";
+        CsvDefinition dnew;
+        std::string out = CsvEdit::SelectColumns(text, d, {2, 0}, "\n", dnew);
+        CHECK(out == "C,A\nc1,a1\nc2,a2\n", "edit: select+reorder columns");
+        CHECK(dnew.Fields.size() == 2 && dnew.Fields[0].Name == "C",
+              "edit: select builds new definition");
+    }
+
+    // ── formatDateTime round trip ───────────────────────────────────────────
+    {
+        ParsedDateTime dt;
+        tryParseDateTimeExact("23-4-2014", "d-M-yyyy", 2026, dt);
+        CHECK(formatDateTime(dt, "yyyy-MM-dd") == "2014-04-23", "edit: date format 1");
+        CHECK(formatDateTime(dt, "d/M/yy") == "23/4/14", "edit: date format 2");
+        tryParseDateTimeExact("2019-12-31 23:59:59.123", "yyyy-MM-dd HH:mm:ss.fff", 2026, dt);
+        CHECK(formatDateTime(dt, "yyyyMMddHHmmss") == "20191231235959", "edit: sortable iso");
     }
 
     printf(gFail ? "== %d FAILURE(S) ==\n" : "== ALL PASS ==\n", gFail);

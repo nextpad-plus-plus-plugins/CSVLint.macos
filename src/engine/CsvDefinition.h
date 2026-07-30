@@ -72,6 +72,12 @@ struct CsvDefinition {
 
     std::string GetIniLines();
 
+    /// "labvalue (2)" -> "labvalue", postfix 2; no parentheses -> postfix -1.
+    static std::string SplitColumnNamePostfix(const std::string &namein, int *postfix);
+    /// Unique name suggestion: returns the base name and, via `postfix`, the
+    /// number to append ("labvalue (4)") or -1 when already unique.
+    std::string GetUniqueColumnName(const std::string &fieldname, int *postfix) const;
+
     int SkipCommentLinesAtStart(TextReader &strdata);
     std::vector<std::string> ParseNextLine(TextReader &strdata, bool &iscomment);
     std::string ConstructHeader() const;

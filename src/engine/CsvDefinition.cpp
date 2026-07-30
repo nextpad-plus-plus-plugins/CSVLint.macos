@@ -411,6 +411,36 @@ void CsvDefinition::CsvDefInitFromKeys(
     for (auto &f : Fields) FieldWidths.push_back(f.MaxWidth);
 }
 
+std::string CsvDefinition::SplitColumnNamePostfix(const std::string &namein, int *postfix) {
+    std::string res = namein;
+    if (postfix) *postfix = -1;
+    size_t pos1 = namein.rfind('(');
+    size_t pos2 = namein.rfind(')');
+    if (pos1 != std::string::npos && pos2 != std::string::npos &&
+        pos1 < pos2 && pos2 == namein.size() - 1) {
+        std::string strnr = namein.substr(pos1 + 1, pos2 - pos1 - 1);
+        int inr = 0;
+        if (tryParseInt(strnr, inr) && !trim(strnr).empty()) {
+            res = trim(namein.substr(0, pos1));
+            if (postfix) *postfix = inr;
+        }
+    }
+    return res;
+}
+
+std::string CsvDefinition::GetUniqueColumnName(const std::string &fieldname, int *postfix) const {
+    int pf = -1;
+    std::string namepart = SplitColumnNamePostfix(fieldname, &pf);
+    for (auto &col : Fields) {
+        if (namepart == col.Name && pf == -1) pf = 2;
+        int inr = -1;
+        std::string colname2 = SplitColumnNamePostfix(col.Name, &inr);
+        if (namepart == colname2 && inr >= pf) pf = inr + 1;
+    }
+    if (postfix) *postfix = pf;
+    return namepart;
+}
+
 std::string CsvDefinition::GetIniLines() {
     std::string res;
 

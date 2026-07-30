@@ -10,6 +10,8 @@
 #include "engine/CsvAnalyze.h"
 #include "engine/CsvValidate.h"
 #include "engine/CsvSchemaIni.h"
+#include "engine/CsvEdit.h"
+#import "CsvLintDialogs.h"
 #include <map>
 #include <string>
 #include <chrono>
@@ -83,6 +85,18 @@ static std::string documentText() {
     Sci_TextRangeFull tr = {{0, (Sci_Position)len}, &text[0]};
     sci(SCI_GETTEXTRANGEFULL, 0, (intptr_t)&tr);
     return text;
+}
+
+static std::string editorEOL() {
+    switch (sci(SCI_GETEOLMODE)) {
+        case SC_EOL_CR: return "\r";
+        case SC_EOL_LF: return "\n";
+        default:        return "\r\n";
+    }
+}
+
+static void setDocumentText(const std::string &text) {
+    sci(SCI_SETTEXT, 0, (intptr_t)text.c_str());
 }
 
 static std::string elapsedSince(std::chrono::steady_clock::time_point t0) {
@@ -310,14 +324,16 @@ static CsvDefinition definitionFromMetaText(std::string *outError) {
 static CsvLintPanelActions *sActions = nil;
 
 static void detectColumnsNow(bool userRequested) {
-    if (![sAutoChk state]) {
-        // Manual detect-parameters dialog arrives with the edit-operations
-        // milestone; until then the checkbox only affects this path.
-        NSAlert *a = [NSAlert new];
-        a.messageText = @"CSV Lint";
-        a.informativeText = @"Manual detection parameters (separator/widths) come in the "
-                            @"next milestone. Uncheck ignored — running auto-detect.";
-        [a runModal];
+    bool autodetect = [sAutoChk state] == NSControlStateValueOn;
+    char sep = '\0';
+    std::string widths;
+    bool header = false;
+    int skip = 0;
+    char comm = csvSettings().CommentCharacter;
+
+    // manual override auto-detect (DetectColumnsForm)
+    if (!autodetect) {
+        if (!csvDlgDetectColumns(sep, widths, header, skip, comm)) return;
     }
 
     setOutput("");
@@ -325,8 +341,8 @@ static void detectColumnsNow(bool userRequested) {
 
     std::string text = documentText();
     CsvDefinition csvdef = CsvAnalyze::InferFromData(
-        text, /*autodetect*/true, '\0', "", false, 0,
-        csvSettings().CommentCharacter, userRequested, /*isCsv*/true);
+        text, autodetect, sep, widths, header, skip, comm,
+        userRequested, /*isCsv*/true);
 
     updateCSVChanges(csvdef, false);
     setCsvDefinitionText(csvdef, true);
@@ -380,6 +396,127 @@ static void detectColumnsNow(bool userRequested) {
 - (void)autoDetectToggled:(id)sender {
     [[NSUserDefaults standardUserDefaults] setBool:([sAutoChk state] == NSControlStateValueOn)
                                             forKey:kAutoDetectKey];
+}
+
+- (void)sortClicked:(id)sender {
+    std::string err;
+    CsvDefinition csvdef = definitionFromMetaText(&err);
+    if (!err.empty() || !checkValidCsvDef(csvdef, "sort data")) return;
+
+    int idx = 0; bool asc = true, val = true;
+    if (!csvDlgSort(csvdef, idx, asc, val)) return;
+
+    setOutput("");
+    auto t0 = std::chrono::steady_clock::now();
+    std::string text = documentText();
+    std::string sortErr;
+    std::string outText = CsvEdit::SortData(text, csvdef, idx, asc, val, editorEOL(), &sortErr);
+    if (!sortErr.empty()) {
+        NSAlert *a = [NSAlert new];
+        a.messageText = @"Sort on column error";
+        a.informativeText = [NSString stringWithUTF8String:sortErr.c_str()] ?: @"";
+        [a runModal];
+        return;
+    }
+    setDocumentText(outText);
+    std::string colname = csvdef.Fields[idx].Name;
+    setOutput("Sort data " + std::string(asc ? "a" : "de") + "scending on column '" +
+              colname + "' is ready, time elapsed " + elapsedSince(t0) + "\r\n");
+    setupIndicators();
+    applyColumnColors();
+}
+
+- (void)addColumnClicked:(id)sender {
+    std::string err;
+    CsvDefinition csvdef = definitionFromMetaText(&err);
+    if (!err.empty() || !checkValidCsvDef(csvdef, "add new column")) return;
+
+    int cod = 0, idx = 0; std::string par1, par2; bool rem = false;
+    if (!csvDlgColumnSplit(csvdef, cod, idx, par1, par2, rem)) return;
+
+    setOutput("");
+    auto t0 = std::chrono::steady_clock::now();
+    std::string text = documentText();
+    CsvDefinition csvnew;
+    std::string outText = CsvEdit::ColumnSplit(text, csvdef, idx, cod, par1, par2, rem,
+                                               editorEOL(), csvnew);
+    setDocumentText(outText);
+
+    std::string msg;
+    if (cod == 1) msg = "was padded with \"" + par1 + "\"";
+    if (cod == 2) msg = "search \"" + par1 + "\" replace with \"" + par2 + "\"";
+    if (cod == 3) msg = "was split on valid and invalid values";
+    if (cod == 4) msg = "was split on character " + par1;
+    if (cod == 5) msg = "was split on position " + par1;
+    if (rem)      msg = msg + (msg.empty() ? "" : "and original column ") + "was removed";
+    msg = "Column \"" + csvdef.Fields[idx].Name + "\" " + msg + "\r\n";
+    msg += "Add new column is ready, time elapsed " + elapsedSince(t0) + "\r\n";
+    setOutput(msg);
+
+    // refresh definition from the changed data (Windows re-runs detect)
+    detectColumnsNow(true);
+    setOutput(msg);
+}
+
+- (void)reformatClicked:(id)sender {
+    setOutput("");
+    std::string err;
+    CsvDefinition csvdef = definitionFromMetaText(&err);
+    if (!err.empty() || !checkValidCsvDef(csvdef, "reformat data")) return;
+
+    std::string newSep, newDt, newDec, replCrLf;
+    bool updSep = false, alignVert = false;
+    if (!csvDlgReformat(csvdef, newSep, updSep, newDt, newDec, replCrLf, alignVert)) return;
+
+    auto t0 = std::chrono::steady_clock::now();
+    std::string text = documentText();
+    std::string outText = CsvEdit::ReformatDataFile(text, csvdef, newSep, updSep, newDt,
+                                                    newDec, replCrLf, alignVert, editorEOL());
+    setDocumentText(outText);
+
+    const CsvSettings &st = csvSettings();
+    std::string msg;
+    if (updSep) {
+        std::string oldsep = csvdef.Separator == '\0' ? "{Fixed width}"
+                             : (csvdef.Separator == '\t' ? "{Tab}"
+                                                          : std::string(1, csvdef.Separator));
+        std::string newsepTxt = (newSep.empty() || newSep[0] == '\0') ? "{Fixed width}"
+                                : (newSep == "\t" ? "{Tab}" : newSep);
+        if (!newSep.empty() && newSep[0] == '\0') csvdef.ColNameHeader = false;
+        msg += "Reformat column separator from " + oldsep + " to " + newsepTxt + "\r\n";
+        csvdef.Separator = newSep.empty() ? '\0' : newSep[0];
+    }
+    if (!newDt.empty()) {
+        msg += "Reformat datetime format from \"" + csvdef.DateTimeFormat + "\" to \"" +
+               newDt + "\"\r\n";
+        csvdef.DateTimeFormat = newDt;
+        for (auto &col : csvdef.Fields)
+            if (col.DataType == ColumnType::DateTime) col.UpdateDateTimeMask(newDt);
+    }
+    if (!newDec.empty()) {
+        msg += "Reformat decimal separator from " + std::string(1, csvdef.DecimalSymbol) +
+               " to " + newDec + "\r\n";
+        csvdef.DecimalSymbol = newDec[0];
+    }
+    if (st.TrimValues || st.ReformatQuotes > 0) {
+        msg += "General settings: ";
+        if (st.TrimValues) msg += "Trim all values";
+        if (st.ReformatQuotes > 0) {
+            std::string quotetxt = "None / Minimal";
+            if (st.ReformatQuotes == 1) quotetxt = "Values with spaces";
+            if (st.ReformatQuotes == 2) quotetxt = "All string values";
+            if (st.ReformatQuotes == 3) quotetxt = "All non-numeric values";
+            if (st.ReformatQuotes == 4) quotetxt = "All values";
+            if (st.TrimValues) msg += ", ";
+            msg += "apply quotes: " + quotetxt;
+        }
+        msg += "\r\n";
+    }
+    msg += "Reformat data is ready, time elapsed " + elapsedSince(t0) + "\r\n";
+    setOutput(msg);
+
+    updateCSVChanges(csvdef, false);
+    setCsvDefinitionText(csvdef, true);
 }
 
 - (void)notYet:(id)sender {
@@ -511,9 +648,9 @@ NSView *csvPanelView(void) {
     sApplyBtn.enabled = NO;
 
     sColorsBtn = makeButton(@"Colors", @selector(toggleColors:), sView);
-    NSButton *sort     = makeButton(@"Sort", @selector(notYet:), sView);
-    NSButton *addcol   = makeButton(@"Add column", @selector(notYet:), sView);
-    NSButton *reformat = makeButton(@"Reformat", @selector(notYet:), sView);
+    NSButton *sort     = makeButton(@"Sort", @selector(sortClicked:), sView);
+    NSButton *addcol   = makeButton(@"Add column", @selector(addColumnClicked:), sView);
+    NSButton *reformat = makeButton(@"Reformat", @selector(reformatClicked:), sView);
     NSButton *validate = makeButton(@"Validate data", @selector(validateData:), sView);
 
     NSButton *gear = makeButton(@"", @selector(openSettings:), sView);
@@ -617,6 +754,47 @@ void csvPanelOnModified(void) {
     if (it == sFileCsvDef.end() || it->second.Fields.empty()) return;
     if (sFileColorsOff[path]) return;
     scheduleRecolor();
+}
+
+void csvPanelAnalyseReport(void) {
+    std::string path = currentFilePath();
+    auto it = sFileCsvDef.find(path);
+    if (it == sFileCsvDef.end()) return;
+    CsvDefinition csvdef = it->second;
+    if (!checkValidCsvDef(csvdef, "analyse data")) return;
+
+    std::string text = documentText();
+
+    // ScriptInfo comment lines
+    std::vector<std::string> comment;
+    size_t slash = path.rfind('/');
+    comment.push_back("Nextpad++ CSV Lint plug-in");
+    comment.push_back("File: " + (slash == std::string::npos ? path : path.substr(slash + 1)));
+
+    std::string report = CsvAnalyze::StatisticalReport(text, csvdef, comment);
+
+    npp(NPPM_MENUCOMMAND, 0, 41001);   // IDM_FILE_NEW
+    setDocumentText(report);
+}
+
+void csvPanelSelectColumns(void) {
+    std::string path = currentFilePath();
+    auto it = sFileCsvDef.find(path);
+    if (it == sFileCsvDef.end()) return;
+    CsvDefinition csvdef = it->second;
+    if (!checkValidCsvDef(csvdef, "select columns")) return;
+
+    std::vector<int> selIdx;
+    if (!csvDlgSelectColumns(csvdef, selIdx)) return;
+
+    std::string text = documentText();
+    CsvDefinition csvnew;
+    std::string outText = CsvEdit::SelectColumns(text, csvdef, selIdx, editorEOL(), csvnew);
+
+    npp(NPPM_MENUCOMMAND, 0, 41001);   // new file (SelectColsNewfile default)
+    setDocumentText(outText);
+    updateCSVChanges(csvnew, false);
+    if (sView && sView.window) setCsvDefinitionText(csvnew, false);
 }
 
 void csvPanelShutdown(void) {

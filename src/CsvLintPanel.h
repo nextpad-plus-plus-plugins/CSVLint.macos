@@ -23,3 +23,9 @@ void csvPanelOnModified(void);
 
 /// NPPN_SHUTDOWN — release UI and timers.
 void csvPanelShutdown(void);
+
+/// Menu: Analyse data report (statistics into a new file).
+void csvPanelAnalyseReport(void);
+
+/// Menu: Select columns (subset/reorder into a new file).
+void csvPanelSelectColumns(void);
