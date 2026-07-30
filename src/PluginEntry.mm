@@ -20,7 +20,7 @@
 #include <cstring>
 
 #define PLUGIN_NAME    "CSV Lint"
-#define PLUGIN_VERSION "0.1.0"
+#define PLUGIN_VERSION "1.0.0"
 static const int NB_FUNC = 11;
 
 static NppData  nppData;
