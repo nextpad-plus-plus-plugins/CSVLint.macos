@@ -29,3 +29,6 @@ void csvPanelAnalyseReport(void);
 
 /// Menu: Select columns (subset/reorder into a new file).
 void csvPanelSelectColumns(void);
+
+/// Menu: Convert data (SQL/XML/JSON into a new file).
+void csvPanelConvertData(void);

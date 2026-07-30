@@ -18,6 +18,12 @@ struct CsvSettings {
     int         ReformatQuotes     = 0;       // 0=minimal 1=spaces 2=strings 3=non-numeric 4=all
     bool        TrimValues         = true;
     int         TwoDigitYearMax    = 0;       // 0 = "CurrentYear" (resolved in ctor)
+    // Convert data / Generate metadata (dialog persistence)
+    int         DataConvertType  = 0;    // 0=SQL 1=XML 2=JSON
+    std::string DataConvertName;         // table name ("" = from file name)
+    int         DataConvertSQL   = 0;    // 0=MySQL 1=MS-SQL 2=PostgreSQL
+    int         DataConvertBatch = 1000;
+    int         MetadataType     = 0;    // 0=ini 1=json 2=datadict 3=py 4=R 5=ps
     // General
     int         AutoSyntaxLimit    = 1024 * 1024;
     char        DefaultQuoteChar   = '"';

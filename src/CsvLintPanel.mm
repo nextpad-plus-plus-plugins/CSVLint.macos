@@ -11,6 +11,7 @@
 #include "engine/CsvValidate.h"
 #include "engine/CsvSchemaIni.h"
 #include "engine/CsvEdit.h"
+#include "engine/CsvConvert.h"
 #import "CsvLintDialogs.h"
 #include <map>
 #include <string>
@@ -821,6 +822,52 @@ void csvPanelSelectColumns(void) {
         setDocumentText(outCopy);
         updateCSVChanges(defCopy, false);   // keyed to the NEW buffer's path now
         if (sView && sView.window) setCsvDefinitionText(defCopy, false);
+    });
+}
+
+void csvPanelConvertData(void) {
+    std::string path = currentFilePath();
+    auto it = sFileCsvDef.find(path);
+    if (it == sFileCsvDef.end()) return;
+    CsvDefinition csvdef = it->second;
+    if (!checkValidCsvDef(csvdef, "convert data")) return;
+
+    CsvSettings &st = csvSettings();
+    int type = st.DataConvertType;
+    std::string tableName = st.DataConvertName;
+    int dialect = st.DataConvertSQL;
+    int batch = st.DataConvertBatch;
+    if (!csvDlgDataConvert(type, tableName, dialect, batch)) return;
+    st.DataConvertType = type;
+    st.DataConvertName = tableName;
+    st.DataConvertSQL = dialect;
+    st.DataConvertBatch = batch;
+
+    CsvConvertOptions opt;
+    opt.sqlDialect = dialect;
+    opt.batchSize = batch;
+    opt.tableName = tableName;
+    size_t slash = path.rfind('/');
+    std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
+    size_t dot = base.rfind('.');
+    opt.fileNameNoExt = dot == std::string::npos ? base : base.substr(0, dot);
+    opt.commentLines = {"Nextpad++ CSV Lint plug-in", "File: " + base};
+
+    std::string text = documentText();
+    std::string out;
+    int lang = 0;
+    switch (type) {
+        case 1:  out = CsvConvert::ToXML(text, csvdef, opt);  lang = 9;  break;  // L_XML
+        case 2:  out = CsvConvert::ToJSON(text, csvdef, opt); lang = 57; break;  // L_JSON
+        default: out = CsvConvert::ToSQL(text, csvdef, opt);  lang = 17; break;  // L_SQL
+    }
+
+    __block std::string outCopy = out;
+    __block int langCopy = lang;
+    __block bool applyLang = (long)out.size() < csvSettings().AutoSyntaxLimit;
+    newFileThen(^{
+        setDocumentText(outCopy);
+        if (applyLang) npp(NPPM_SETCURRENTLANGTYPE, 0, langCopy);
     });
 }
 

@@ -9,6 +9,7 @@
 #include "../src/engine/CsvValidate.h"
 #include "../src/engine/DateTimeMask.h"
 #include "../src/engine/CsvEdit.h"
+#include "../src/engine/CsvConvert.h"
 
 static int gFail = 0;
 #define CHECK(cond, msg) do { \
@@ -425,6 +426,50 @@ int main() {
         CHECK(formatDateTime(dt, "d/M/yy") == "23/4/14", "edit: date format 2");
         tryParseDateTimeExact("2019-12-31 23:59:59.123", "yyyy-MM-dd HH:mm:ss.fff", 2026, dt);
         CHECK(formatDateTime(dt, "yyyyMMddHHmmss") == "20191231235959", "edit: sortable iso");
+    }
+
+    // ── CsvConvert: SQL / XML / JSON ────────────────────────────────────────
+    {
+        std::string err;
+        CsvDefinition d = CsvDefinition::FromIniLines(
+            "Format=CSVDelimited\nColNameHeader=True\nDateTimeFormat=yyyy-mm-dd\n"
+            "DecimalSymbol=.\nNumberDigits=1\n"
+            "Col1=Id Integer Width 3\nCol2=Name Text Width 8\n"
+            "Col3=Amt Float Width 6\nCol4=When DateTime Width 10\n", &err);
+        std::string text = "Id,Name,When\n1,Bob's,2.5,2020-01-31\n2,Ann,3.5,2020-02-15\n";
+        text = "Id,Name,Amt,When\n1,Bob's,2.5,2020-01-31\n2,Ann,3.5,2020-02-15\n";
+        CsvConvertOptions opt;
+        opt.fileNameNoExt = "unit test";
+        opt.commentLines = {"File: unit.csv"};
+
+        CsvDefinition dsql = d;
+        std::string sql = CsvConvert::ToSQL(text, dsql, opt);
+        CHECK(sql.find("CREATE TABLE unit_test (") != std::string::npos,
+              "sql: table name from file, spaces to underscore");
+        CHECK(sql.find("Id integer,") != std::string::npos, "sql: integer column");
+        CHECK(sql.find("Amt numeric(6,1),") != std::string::npos, "sql: numeric column");
+        CHECK(sql.find("When datetime,") != std::string::npos, "sql: datetime column");
+        CHECK(sql.find("(1, 'Bob''s', 2.5, '2020-01-31 00:00:00'),") != std::string::npos,
+              "sql: insert row with escaped quote + iso datetime");
+        CHECK(sql.find("(2, 'Ann', 3.5, '2020-02-15 00:00:00');") != std::string::npos,
+              "sql: last row ends with semicolon");
+        CHECK(sql.find("-- insert records 1 - 2\r\n") != std::string::npos,
+              "sql: batch comment with record count");
+
+        CsvDefinition dxml = d;
+        std::string xml = CsvConvert::ToXML(text, dxml, opt);
+        CHECK(xml.find("<unit_test>") != std::string::npos, "xml: record tag");
+        CHECK(xml.find("<Name>Bob&apos;s</Name>") != std::string::npos, "xml: escaped value");
+        CHECK(xml.find("<When>2020-01-31T00:00:00</When>") != std::string::npos,
+              "xml: sortable datetime");
+
+        CsvDefinition djson = d;
+        std::string json = CsvConvert::ToJSON(text, djson, opt);
+        CHECK(json.find("\"Id\": 1,") != std::string::npos, "json: bare integer");
+        CHECK(json.find("\"Name\": \"Bob's\",") != std::string::npos, "json: string quoted");
+        CHECK(json.find("\"Amt\": 2.5,") != std::string::npos, "json: bare decimal");
+        CHECK(json.find("\"When\": \"2020-01-31T00:00:00\"") != std::string::npos,
+              "json: datetime quoted iso");
     }
 
     printf(gFail ? "== %d FAILURE(S) ==\n" : "== ALL PASS ==\n", gFail);

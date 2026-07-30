@@ -312,3 +312,38 @@ bool csvDlgSelectColumns(const CsvDefinition &csvdef, std::vector<int> &selIdx) 
         if (ctl.checked[i].boolValue) selIdx.push_back(ctl.order[i].intValue);
     return !selIdx.empty();
 }
+
+// ── DataConvertForm ─────────────────────────────────────────────────────────
+
+bool csvDlgDataConvert(int &convertType, std::string &tableName, int &sqlDialect,
+                       int &batchSize) {
+    CsvDlgController *ctl = [CsvDlgController new];
+    NSWindow *win = makeDialog(@"Convert data", 380, 230);
+    NSView *v = win.contentView;
+
+    addLabel(v, @"Convert to:", 15, 192, 130);
+    NSPopUpButton *typePopup = addPopup(v, @[@"SQL insert script", @"XML", @"JSON"],
+                                        150, 188, 215);
+    [typePopup selectItemAtIndex:(convertType >= 0 && convertType <= 2) ? convertType : 0];
+
+    addLabel(v, @"Table/record name:", 15, 159, 130);
+    NSTextField *nameField = addField(v, [NSString stringWithUTF8String:tableName.c_str()],
+                                      150, 155, 215);
+    nameField.placeholderString = @"(empty = use file name)";
+
+    addLabel(v, @"SQL type:", 15, 126, 130);
+    NSPopUpButton *sqlPopup = addPopup(v, @[@"MySQL / MariaDB", @"MS-SQL", @"PostgreSQL"],
+                                       150, 122, 215);
+    [sqlPopup selectItemAtIndex:(sqlDialect >= 0 && sqlDialect <= 2) ? sqlDialect : 0];
+
+    addLabel(v, @"SQL batch size:", 15, 93, 130);
+    NSTextField *batchField = addField(v, [NSString stringWithFormat:@"%d", batchSize],
+                                       150, 89, 90);
+
+    if (!runDialog(win, ctl)) return false;
+    convertType = (int)typePopup.indexOfSelectedItem;
+    tableName = nameField.stringValue.UTF8String ?: "";
+    sqlDialect = (int)sqlPopup.indexOfSelectedItem;
+    batchSize = batchField.integerValue > 0 ? (int)batchField.integerValue : 1000;
+    return true;
+}
