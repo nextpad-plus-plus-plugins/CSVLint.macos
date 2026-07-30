@@ -8,6 +8,7 @@
 @implementation CsvDlgController
 - (void)ok:(id)sender     { [NSApp stopModalWithCode:NSModalResponseOK]; }
 - (void)cancel:(id)sender { [NSApp stopModalWithCode:NSModalResponseCancel]; }
+- (void)radioPick:(id)sender {}   // shared action so sibling radios group
 @end
 
 static NSWindow *makeDialog(NSString *title, CGFloat w, CGFloat h) {
@@ -345,5 +346,43 @@ bool csvDlgDataConvert(int &convertType, std::string &tableName, int &sqlDialect
     tableName = nameField.stringValue.UTF8String ?: "";
     sqlDialect = (int)sqlPopup.indexOfSelectedItem;
     batchSize = batchField.integerValue > 0 ? (int)batchField.integerValue : 1000;
+    return true;
+}
+
+// ── MetaDataGenerateForm ────────────────────────────────────────────────────
+
+bool csvDlgGenerateMetadata(int &metadataType) {
+    CsvDlgController *ctl = [CsvDlgController new];
+    NSWindow *win = makeDialog(@"Generate metadata", 320, 300);
+    NSView *v = win.contentView;
+
+    addLabel(v, @"Generate metadata or script", 15, 268, 290);
+
+    NSTextField *sec1 = addLabel(v, @"Generate metadata", 15, 240, 290);
+    sec1.font = [NSFont boldSystemFontOfSize:12];
+
+    NSArray<NSString *> *titles = @[
+        @"Schema ini", @"W3C CSV schema JSON", @"Datadictionary CSV",
+        @"Python script", @"R-script", @"PowerShell"
+    ];
+    // y positions: metadata group, then "Generate script" section, script group
+    CGFloat ys[6] = {216, 194, 172, 116, 94, 72};
+    NSMutableArray<NSButton *> *radios = [NSMutableArray array];
+    for (NSUInteger i = 0; i < titles.count; i++) {
+        NSButton *r = [NSButton radioButtonWithTitle:titles[i]
+                                              target:ctl
+                                              action:@selector(radioPick:)];
+        r.frame = NSMakeRect(30, ys[i], 260, 20);
+        r.state = ((int)i == metadataType) ? NSControlStateValueOn : NSControlStateValueOff;
+        [v addSubview:r];
+        [radios addObject:r];
+    }
+
+    NSTextField *sec2 = addLabel(v, @"Generate script", 15, 144, 290);
+    sec2.font = [NSFont boldSystemFontOfSize:12];
+
+    if (!runDialog(win, ctl)) return false;
+    for (NSUInteger i = 0; i < radios.count; i++)
+        if (radios[i].state == NSControlStateValueOn) { metadataType = (int)i; break; }
     return true;
 }

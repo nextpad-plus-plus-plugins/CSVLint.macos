@@ -10,6 +10,7 @@
 #include "../src/engine/DateTimeMask.h"
 #include "../src/engine/CsvEdit.h"
 #include "../src/engine/CsvConvert.h"
+#include "../src/engine/CsvGenerateCode.h"
 
 static int gFail = 0;
 #define CHECK(cond, msg) do { \
@@ -470,6 +471,105 @@ int main() {
         CHECK(json.find("\"Amt\": 2.5,") != std::string::npos, "json: bare decimal");
         CHECK(json.find("\"When\": \"2020-01-31T00:00:00\"") != std::string::npos,
               "json: datetime quoted iso");
+    }
+
+    // ── CsvGenerateCode: 6 metadata/script generators ───────────────────────
+    {
+        std::string err;
+        CsvDefinition d = CsvDefinition::FromIniLines(
+            "Format=CSVDelimited\nColNameHeader=True\nDateTimeFormat=yyyy-mm-dd\n"
+            "DecimalSymbol=.\nNumberDigits=1\n"
+            "Col1=Id Integer Width 3\nCol2=Name Text Width 8\n"
+            "Col3=Amt Float Width 6\nCol4=When DateTime Width 10\n"
+            "Col5=Status Text Width 4\n"
+            ";Col5=Status Text Width 4 Enumeration OK|NOK\n", &err);
+        CsvGenerateOptions gopt;
+        gopt.filePath = "/tmp/unit.csv";
+        gopt.fileName = "unit.csv";
+        gopt.fileDir = "/tmp";
+        gopt.commentLines = {"File: unit.csv"};
+        gopt.exampleYear = 2026;
+
+        std::string ini = CsvGenerateCode::SchemaIni(d, gopt);
+        CHECK(ini.rfind("[unit.csv]\r\n", 0) == 0, "gen ini: filename section header");
+        CHECK(ini.find("DateTimeFormat=yyyy-mm-dd") != std::string::npos,
+              "gen ini: external datetime mask");
+        // C# builds the ";ColN" comment from the bare column name (datatype and
+        // width are appended to `def` only after the enum comment is written).
+        CHECK(ini.find(";Col5=Status Enumeration OK|NOK") != std::string::npos,
+              "gen ini: enum comment line survives");
+        CHECK(ini.find("; NOTE: some CSV Lint features are not supported") != std::string::npos,
+              "gen ini: ODBC note because of enum column");
+
+        std::string json = CsvGenerateCode::SchemaJSON(d, gopt);
+        CHECK(json.find("\"url\": \"unit.csv\"") != std::string::npos, "gen json: url");
+        CHECK(json.find("\"delimiter\": \",\"") != std::string::npos, "gen json: delimiter");
+        CHECK(json.find("\"datatype\": \"integer\"") != std::string::npos,
+              "gen json: integer datatype");
+        CHECK(json.find("\"decimalChar\": \".\"") != std::string::npos &&
+              json.find("\"pattern\": \"#0.0\"") != std::string::npos,
+              "gen json: decimal pattern object");
+        CHECK(json.find("\"base\": \"date\"") != std::string::npos &&
+              json.find("\"format\": \"yyyy-MM-dd\"") != std::string::npos,
+              "gen json: date base + internal mask format");
+        CHECK(json.find("\"format\": \"OK|NOK\"") != std::string::npos,
+              "gen json: enum format list");
+
+        std::string dict = CsvGenerateCode::DatadictionaryCSV(d, gopt);
+        CHECK(dict.rfind("Nr,ColumnName,DataType,Width,Decimals,Mask,Enumeration\r\n", 0) == 0,
+              "gen dict: header row");
+        CHECK(dict.find("1,Id,Integer,3,,,") != std::string::npos, "gen dict: integer row");
+        CHECK(dict.find("3,Amt,Decimal,6,1,#0.0,") != std::string::npos, "gen dict: decimal row");
+        CHECK(dict.find("4,When,Date,10,,yyyy-MM-dd,") != std::string::npos,
+              "gen dict: date row");
+        CHECK(dict.find("5,Status,String,4,,,OK|NOK") != std::string::npos,
+              "gen dict: enum row");
+
+        std::string py = CsvGenerateCode::PythonPanda(d, gopt);
+        CHECK(py.find("os.chdir(\"/tmp\")\r\n") != std::string::npos &&
+              py.find("filename = \"/tmp/unit.csv\"") != std::string::npos,
+              "gen py: chdir + full-path filename");
+        CHECK(py.find("\"Id\": np.int64,") != std::string::npos, "gen py: int64 dtype");
+        CHECK(py.find("# datetime columns; '%Y-%m-%d'") != std::string::npos &&
+              py.find("col_dates = ['When']") != std::string::npos,
+              "gen py: strftime mask + parse_dates list");
+        CHECK(py.find("df = pd.read_csv(filename, sep=',', decimal='.', header=0, "
+                      "parse_dates=col_dates)") != std::string::npos,
+              "gen py: read_csv call");
+        CHECK(py.find("\"Status\": [\"OK\", \"NOK\"]") != std::string::npos,
+              "gen py: enum allowed values");
+        CHECK(py.find("#df = df[(df[\"When\"] >= \"2026-01-01\")") != std::string::npos,
+              "gen py: example year in filter suggestion");
+
+        std::string r = CsvGenerateCode::RScript(d, gopt);
+        CHECK(r.find("setwd(\"/tmp\")") != std::string::npos, "gen r: setwd");
+        CHECK(r.find("df$When <- as.Date(df$When, format=\"%Y-%m-%d\")") != std::string::npos,
+              "gen r: as.Date conversion");
+        CHECK(r.find("df$Amt <- as.numeric(df$Amt)") != std::string::npos,
+              "gen r: as.numeric conversion");
+        CHECK(r.find("df <- read.csv(filename, sep=',', dec=\".\", header=TRUE)")
+                  != std::string::npos,
+              "gen r: read.csv call");
+        CHECK(r.find("\"Status\" = c(\"OK\", \"NOK\")") != std::string::npos,
+              "gen r: enum allowed values");
+
+        std::string ps = CsvGenerateCode::PowerShell(d, gopt);
+        CHECK(ps.find("$pathname = \"/tmp/\"") != std::string::npos &&
+              ps.find("$filename = $pathname + \"unit.csv\"") != std::string::npos,
+              "gen ps: path + filename");
+        CHECK(ps.find("$csvdata = Import-Csv -Path $filename -Delimiter \",\"")
+                  != std::string::npos,
+              "gen ps: Import-Csv call");
+        CHECK(ps.find("[datetime]::parseexact($row.When, 'yyyy-MM-dd', $null)")
+                  != std::string::npos,
+              "gen ps: datetime parseexact keeps C# mask");
+        CHECK(ps.find("[int]($row.Id -replace 'NaN', '')") != std::string::npos,
+              "gen ps: int conversion strips NullKeyword");
+        CHECK(ps.find("[decimal]($row.Amt -replace ',', '')") != std::string::npos,
+              "gen ps: decimal conversion point-decimal");
+        CHECK(ps.find("$Status_array = @(\"OK\", \"NOK\")") != std::string::npos &&
+              ps.find("!($Status_array -contains $row.Status)") != std::string::npos,
+              "gen ps: enum array + containment check");
     }
 
     printf(gFail ? "== %d FAILURE(S) ==\n" : "== ALL PASS ==\n", gFail);

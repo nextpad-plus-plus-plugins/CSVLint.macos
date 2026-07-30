@@ -32,3 +32,7 @@ bool csvDlgSelectColumns(const CsvDefinition &csvdef, std::vector<int> &selIdx);
 /// DataConvertForm: type 0=SQL 1=XML 2=JSON + table name + SQL dialect+batch.
 bool csvDlgDataConvert(int &convertType, std::string &tableName, int &sqlDialect,
                        int &batchSize);
+
+/// MetaDataGenerateForm: 0=schema.ini 1=schema JSON 2=datadictionary CSV
+/// 3=Python 4=R-script 5=PowerShell.
+bool csvDlgGenerateMetadata(int &metadataType);

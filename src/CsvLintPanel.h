@@ -32,3 +32,6 @@ void csvPanelSelectColumns(void);
 
 /// Menu: Convert data (SQL/XML/JSON into a new file).
 void csvPanelConvertData(void);
+
+/// Plugin menu "Generate metadata" (MetaDataGenerateForm + CsvGenerateCode).
+void csvPanelGenerateMetadata(void);

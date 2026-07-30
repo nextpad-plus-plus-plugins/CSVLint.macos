@@ -95,7 +95,7 @@ static void cmdLintWindow()       { toggleLintWindow(); }
 static void cmdAnalyseReport()    { csvPanelAnalyseReport(); }
 static void cmdSelectColumns()    { csvPanelSelectColumns(); }
 static void cmdConvertData()      { csvPanelConvertData(); }
-static void cmdGenerateMetadata() { notImplemented("Generate metadata"); }
+static void cmdGenerateMetadata() { csvPanelGenerateMetadata(); }
 static void cmdSettings()         { notImplemented("Settings"); }
 
 static void cmdDocumentation() {

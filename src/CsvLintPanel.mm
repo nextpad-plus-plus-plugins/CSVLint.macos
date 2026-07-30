@@ -12,6 +12,7 @@
 #include "engine/CsvSchemaIni.h"
 #include "engine/CsvEdit.h"
 #include "engine/CsvConvert.h"
+#include "engine/CsvGenerateCode.h"
 #import "CsvLintDialogs.h"
 #include <map>
 #include <string>
@@ -865,6 +866,49 @@ void csvPanelConvertData(void) {
     __block std::string outCopy = out;
     __block int langCopy = lang;
     __block bool applyLang = (long)out.size() < csvSettings().AutoSyntaxLimit;
+    newFileThen(^{
+        setDocumentText(outCopy);
+        if (applyLang) npp(NPPM_SETCURRENTLANGTYPE, 0, langCopy);
+    });
+}
+
+void csvPanelGenerateMetadata(void) {
+    std::string path = currentFilePath();
+    auto it = sFileCsvDef.find(path);
+    if (it == sFileCsvDef.end()) return;
+    CsvDefinition csvdef = it->second;
+    if (!checkValidCsvDef(csvdef, "generate metadata")) return;
+
+    CsvSettings &st = csvSettings();
+    int type = st.MetadataType;
+    if (!csvDlgGenerateMetadata(type)) return;
+    st.MetadataType = type;
+
+    CsvGenerateOptions opt;
+    opt.filePath = path;
+    size_t slash = path.rfind('/');
+    opt.fileName = slash == std::string::npos ? path : path.substr(slash + 1);
+    opt.fileDir = slash == std::string::npos ? "" : path.substr(0, slash);
+    opt.commentLines = {"Nextpad++ CSV Lint plug-in", "File: " + opt.fileName};
+    std::time_t t = std::time(nullptr);
+    std::tm tmv{};
+    localtime_r(&t, &tmv);
+    opt.exampleYear = tmv.tm_year + 1900;
+
+    std::string out;
+    int lang = 0;
+    switch (type) {
+        case 1:  out = CsvGenerateCode::SchemaJSON(csvdef, opt);        lang = 57; break; // L_JSON
+        case 2:  out = CsvGenerateCode::DatadictionaryCSV(csvdef, opt); lang = 0;  break; // plain (C# parity)
+        case 3:  out = CsvGenerateCode::PythonPanda(csvdef, opt);       lang = 22; break; // L_PYTHON
+        case 4:  out = CsvGenerateCode::RScript(csvdef, opt);           lang = 54; break; // L_R
+        case 5:  out = CsvGenerateCode::PowerShell(csvdef, opt);        lang = 53; break; // L_POWERSHELL
+        default: out = CsvGenerateCode::SchemaIni(csvdef, opt);         lang = 13; break; // L_INI
+    }
+
+    __block std::string outCopy = out;
+    __block int langCopy = lang;
+    __block bool applyLang = lang != 0 && (long)out.size() < csvSettings().AutoSyntaxLimit;
     newFileThen(^{
         setDocumentText(outCopy);
         if (applyLang) npp(NPPM_SETCURRENTLANGTYPE, 0, langCopy);
