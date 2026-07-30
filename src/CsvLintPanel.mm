@@ -756,6 +756,28 @@ void csvPanelOnModified(void) {
     scheduleRecolor();
 }
 
+/// The host dispatches NPPM_MENUCOMMAND asynchronously — request the new
+/// file, then run `block` only once the current buffer actually changed.
+static void newFileThen(void (^block)(void)) {
+    intptr_t oldBuf = npp(NPPM_GETCURRENTBUFFERID);
+    npp(NPPM_MENUCOMMAND, 0, 41001);   // IDM_FILE_NEW
+    __block int attempts = 0;
+    __block __weak dispatch_block_t weakTry = nil;
+    dispatch_block_t tryRun = dispatch_block_create(DISPATCH_BLOCK_INHERIT_QOS_CLASS, ^{
+        if (npp(NPPM_GETCURRENTBUFFERID) != oldBuf || ++attempts > 20) {
+            block();
+        } else {
+            dispatch_block_t strongTry = weakTry;
+            if (strongTry)
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
+                               dispatch_get_main_queue(), strongTry);
+        }
+    });
+    weakTry = tryRun;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), tryRun);
+}
+
 void csvPanelAnalyseReport(void) {
     std::string path = currentFilePath();
     auto it = sFileCsvDef.find(path);
@@ -773,8 +795,10 @@ void csvPanelAnalyseReport(void) {
 
     std::string report = CsvAnalyze::StatisticalReport(text, csvdef, comment);
 
-    npp(NPPM_MENUCOMMAND, 0, 41001);   // IDM_FILE_NEW
-    setDocumentText(report);
+    __block std::string reportCopy = report;
+    newFileThen(^{
+        setDocumentText(reportCopy);
+    });
 }
 
 void csvPanelSelectColumns(void) {
@@ -791,10 +815,13 @@ void csvPanelSelectColumns(void) {
     CsvDefinition csvnew;
     std::string outText = CsvEdit::SelectColumns(text, csvdef, selIdx, editorEOL(), csvnew);
 
-    npp(NPPM_MENUCOMMAND, 0, 41001);   // new file (SelectColsNewfile default)
-    setDocumentText(outText);
-    updateCSVChanges(csvnew, false);
-    if (sView && sView.window) setCsvDefinitionText(csvnew, false);
+    __block std::string outCopy = outText;
+    __block CsvDefinition defCopy = csvnew;
+    newFileThen(^{
+        setDocumentText(outCopy);
+        updateCSVChanges(defCopy, false);   // keyed to the NEW buffer's path now
+        if (sView && sView.window) setCsvDefinitionText(defCopy, false);
+    });
 }
 
 void csvPanelShutdown(void) {
