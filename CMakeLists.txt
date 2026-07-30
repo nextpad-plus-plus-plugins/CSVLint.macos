@@ -14,6 +14,7 @@ add_library(CSVLint SHARED
     src/PluginEntry.mm
     src/CsvLintPanel.mm
     src/CsvLintDialogs.mm
+    src/CsvSettingsIO.mm
     src/engine/CsvEdit.cpp
     src/engine/CsvConvert.cpp
     src/engine/CsvGenerateCode.cpp

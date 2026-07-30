@@ -14,10 +14,10 @@
 #include "engine/CsvConvert.h"
 #include "engine/CsvGenerateCode.h"
 #import "CsvLintDialogs.h"
+#import "CsvSettingsIO.h"
 #include <map>
 #include <string>
 #include <chrono>
-#import <os/log.h>
 
 // ── state ───────────────────────────────────────────────────────────────────
 
@@ -34,9 +34,6 @@ static dispatch_block_t sRecolorPending = nil;
 
 static std::map<std::string, CsvDefinition> sFileCsvDef;   // Main.FileCsvDef
 static std::map<std::string, bool>          sFileColorsOff; // "Aa" toggle per file
-
-// Interim persistence for the auto-matic checkbox (full settings phase later).
-static NSString *const kAutoDetectKey = @"CSVLintAutoDetectColumns";
 
 // 12-color presets from upstream extra/CSVLint_12_colors.xml (RRGGBB).
 static const int kLightColors[12] = {
@@ -159,6 +156,7 @@ static void applyColumnColors() {
 
     std::string text = documentText();
     const char quoteChar = csvSettings().DefaultQuoteChar;
+    const bool sepColor = csvSettings().SeparatorColor;
     size_t p = 0;
     int skip = def.SkipLines;
 
@@ -218,7 +216,8 @@ static void applyColumnColors() {
                     inQuote = true;
                     atValueStart = false;
                 } else if (ch == def.Separator) {
-                    fill(valStart, p, col);
+                    // SeparatorColor: extend the box through the separator char
+                    fill(valStart, sepColor ? p + 1 : p, col);
                     col++;
                     valStart = p + 1;
                     atValueStart = true;
@@ -278,7 +277,6 @@ static void updateCSVChanges(CsvDefinition &csvdef, bool saveini) {
     setupIndicators();
     applyColumnColors();
 
-    os_log(OS_LOG_DEFAULT, "[CSVLint] updateCSVChanges %{public}s saveini=%d", path.c_str(), (int)saveini);
     if (saveini) {
         std::string errmsg;
         CsvDefinition stored = csvdef;   // GetIniLines is non-const (NumberDigits recompute)
@@ -349,8 +347,6 @@ static void detectColumnsNow(bool userRequested) {
     updateCSVChanges(csvdef, false);
     setCsvDefinitionText(csvdef, true);
     setOutput("Detecting columns from data is ready, time elapsed " + elapsedSince(t0));
-    NSLog(@"[CSVLint] detect: sep=%d cols=%zu header=%d", (int)csvdef.Separator,
-          csvdef.Fields.size(), (int)csvdef.ColNameHeader);
 }
 
 @implementation CsvLintPanelActions
@@ -392,12 +388,11 @@ static void detectColumnsNow(bool userRequested) {
     CsvValidate csvval;
     csvval.ValidateData(rd, csvdef, elapsedSince(t0));
     setOutput(csvval.Report());
-    NSLog(@"[CSVLint] validate: %zu log lines", csvval.log().size());
 }
 
 - (void)autoDetectToggled:(id)sender {
-    [[NSUserDefaults standardUserDefaults] setBool:([sAutoChk state] == NSControlStateValueOn)
-                                            forKey:kAutoDetectKey];
+    csvSettings().AutoDetectColumns = [sAutoChk state] == NSControlStateValueOn;
+    csvSettingsSave();
 }
 
 - (void)sortClicked:(id)sender {
@@ -531,10 +526,7 @@ static void detectColumnsNow(bool userRequested) {
 }
 
 - (void)openSettings:(id)sender {
-    NSAlert *a = [NSAlert new];
-    a.messageText = @"CSV Lint";
-    a.informativeText = @"Settings window arrives with the settings milestone.";
-    [a runModal];
+    csvPanelShowSettings();
 }
 
 @end
@@ -640,10 +632,8 @@ NSView *csvPanelView(void) {
                                     action:@selector(autoDetectToggled:)];
     sAutoChk.translatesAutoresizingMaskIntoConstraints = NO;
     sAutoChk.controlSize = NSControlSizeSmall;
-    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    sAutoChk.state = ([ud objectForKey:kAutoDetectKey] == nil ||
-                      [ud boolForKey:kAutoDetectKey])
-                         ? NSControlStateValueOn : NSControlStateValueOff;
+    sAutoChk.state = csvSettings().AutoDetectColumns ? NSControlStateValueOn
+                                                     : NSControlStateValueOff;
     [sView addSubview:sAutoChk];
 
     sApplyBtn = makeButton(@"Apply", @selector(applyMeta:), sView);
@@ -728,9 +718,6 @@ void csvPanelOnBufferActivated(void) {
                                                /*userRequested*/false, is_csv);
         }
         it = sFileCsvDef.emplace(filename, csvdef).first;
-        os_log(OS_LOG_DEFAULT, "[CSVLint] bufferActivated %{public}s ext=%{public}s: sep=%d cols=%zu scan=%d",
-              filename.c_str(), currentExtLower().c_str(),
-              (int)csvdef.Separator, csvdef.Fields.size(), (int)csvdef.ScanState);
     }
 
     setupIndicators();
@@ -913,6 +900,18 @@ void csvPanelGenerateMetadata(void) {
         setDocumentText(outCopy);
         if (applyLang) npp(NPPM_SETCURRENTLANGTYPE, 0, langCopy);
     });
+}
+
+void csvPanelShowSettings(void) {
+    if (!csvDlgSettings()) return;
+    csvSettingsSave();
+    // Refresh: auto-matic checkbox + column colors (SeparatorColor /
+    // AutoSyntaxLimit / DefaultQuoteChar may have changed).
+    if (sAutoChk)
+        sAutoChk.state = csvSettings().AutoDetectColumns ? NSControlStateValueOn
+                                                         : NSControlStateValueOff;
+    setupIndicators();
+    applyColumnColors();
 }
 
 void csvPanelShutdown(void) {

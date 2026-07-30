@@ -35,3 +35,7 @@ void csvPanelConvertData(void);
 
 /// Plugin menu "Generate metadata" (MetaDataGenerateForm + CsvGenerateCode).
 void csvPanelGenerateMetadata(void);
+
+/// Plugin menu "Settings" + panel gear button: settings window, then save +
+/// recolor with the new values.
+void csvPanelShowSettings(void);

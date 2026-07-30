@@ -36,3 +36,7 @@ bool csvDlgDataConvert(int &convertType, std::string &tableName, int &sqlDialect
 /// MetaDataGenerateForm: 0=schema.ini 1=schema JSON 2=datadictionary CSV
 /// 3=Python 4=R-script 5=PowerShell.
 bool csvDlgGenerateMetadata(int &metadataType);
+
+/// Settings window (Windows property-grid parity: Analyze/Edit/General).
+/// Applies to csvSettings() on OK; returns true when the user confirmed.
+bool csvDlgSettings(void);

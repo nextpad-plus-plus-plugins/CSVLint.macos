@@ -386,3 +386,157 @@ bool csvDlgGenerateMetadata(int &metadataType) {
         if (radios[i].state == NSControlStateValueOn) { metadataType = (int)i; break; }
     return true;
 }
+
+// ── Settings window (property-grid parity) ──────────────────────────────────
+
+#include "CsvSettingsIO.h"
+
+/// Row helper: label at x=15, control column at x=280.
+static const CGFloat kSetLabelW = 255, kSetCtrlX = 280, kSetCtrlW = 240;
+
+static NSTextField *setRowField(NSView *v, NSString *label, NSString *value,
+                                CGFloat y, NSString *help) {
+    NSTextField *l = addLabel(v, label, 15, y + 3, kSetLabelW);
+    NSTextField *f = addField(v, value, kSetCtrlX, y, kSetCtrlW);
+    l.toolTip = help;
+    f.toolTip = help;
+    return f;
+}
+
+static NSButton *setRowCheck(NSView *v, NSString *label, bool on, CGFloat y,
+                             NSString *help) {
+    NSTextField *l = addLabel(v, label, 15, y + 2, kSetLabelW);
+    NSButton *c = addCheck(v, @"", on, kSetCtrlX, y, 40);
+    l.toolTip = help;
+    c.toolTip = help;
+    return c;
+}
+
+static NSTextField *setSection(NSView *v, NSString *title, CGFloat y) {
+    NSTextField *l = addLabel(v, title, 15, y, 200);
+    l.font = [NSFont boldSystemFontOfSize:12];
+    return l;
+}
+
+bool csvDlgSettings(void) {
+    CsvSettings &st = csvSettings();
+    CsvDlgController *ctl = [CsvDlgController new];
+    NSWindow *win = makeDialog(@"CSV Lint Settings", 540, 610);
+    NSView *v = win.contentView;
+
+    // ── Analyze ─────────────────────────────────────────────────────────────
+    setSection(v, @"Analyze", 578);
+    NSTextField *fComment = setRowField(v, @"Comment character:",
+        [NSString stringWithFormat:@"%c", st.CommentCharacter], 550,
+        @"Comment character, when the first lines start with this character "
+        @"they will be skipped as comment lines");
+    NSTextField *fDecMax = setRowField(v, @"Decimal digits maximum:",
+        [NSString stringWithFormat:@"%d", st.DecimalDigitsMax], 522,
+        @"Maximum amount of decimals for decimal values, if a value has more "
+        @"then it's considered a text value. Applies to both autodetecting "
+        @"datatypes and validating data.");
+    NSButton *cLeadZero = setRowCheck(v, @"Decimal leading zero:",
+        st.DecimalLeadingZero, 494,
+        @"Decimal values must have leading zero, set to false to accept "
+        @"values like .5 or .01");
+    NSTextField *fErrTol = setRowField(v, @"Error tolerance (%):",
+        [NSString stringWithFormat:@"%d", st.ErrorTolerance], 466,
+        @"Error tolerance percentage, when analyzing allow X % errors. For "
+        @"example when a column with a 1000 values contains all integers "
+        @"except for 9 or fewer non-integer values, then it's still "
+        @"interpreted as an integer column.");
+    NSTextField *fIntMax = setRowField(v, @"Integer digits maximum:",
+        [NSString stringWithFormat:@"%d", st.IntegerDigitsMax], 438,
+        @"Maximum amount of digits for integer values, if a value has more "
+        @"then it's considered a text value. Useful to distinguish (bar)codes "
+        @"and actual numeric values.");
+    NSTextField *fUnique = setRowField(v, @"Unique values maximum:",
+        [NSString stringWithFormat:@"%d", st.UniqueValuesMax], 410,
+        @"Maximum unique values when reporting or detecting coded values, if "
+        @"column contains more than it's not reported.");
+    NSTextField *fYearMax = setRowField(v, @"Year maximum:",
+        [NSString stringWithFormat:@"%d", st.YearMaximum], 382,
+        @"When detecting or validating date or datetime values, years larger "
+        @"than this value will be considered as out-of-range.");
+    NSTextField *fYearMin = setRowField(v, @"Year minimum:",
+        [NSString stringWithFormat:@"%d", st.YearMinimum], 354,
+        @"When detecting or validating date or datetime values, years smaller "
+        @"than this value will be considered as out-of-range.");
+
+    // ── Edit ────────────────────────────────────────────────────────────────
+    setSection(v, @"Edit", 322);
+    NSTextField *lQuotes = addLabel(v, @"Reformat, apply quotes:", 15, 297, kSetLabelW);
+    NSPopUpButton *pQuotes = addPopup(v, @[
+        @"None, minimal quotes", @"Values with spaces", @"All string values",
+        @"All non-numeric values", @"All values"], kSetCtrlX, 292, kSetCtrlW);
+    NSString *helpQuotes = @"Reformat dataset, apply quotes option.";
+    lQuotes.toolTip = helpQuotes;
+    pQuotes.toolTip = helpQuotes;
+    if (st.ReformatQuotes >= 0 && st.ReformatQuotes <= 4)
+        [pQuotes selectItemAtIndex:st.ReformatQuotes];
+    NSButton *cTrim = setRowCheck(v, @"Trim values:", st.TrimValues, 266,
+        @"Trim values when editing, sorting or analyzing data. Recommended, "
+        @"because when disabled the column datatypes will not always be "
+        @"detected correctly.");
+    NSTextField *fYear2 = setRowField(v, @"Two digit year maximum:",
+        [NSString stringWithUTF8String:st.TwoDigitYearMaxStr.c_str()], 238,
+        @"Maximum year for two digit year date values. For example, when set "
+        @"to 2030 the year values 30 and 31 will be interpreted as 2030 and "
+        @"1931. Set as CurrentYear for current year.");
+
+    // ── General ─────────────────────────────────────────────────────────────
+    setSection(v, @"General", 206);
+    NSTextField *fSyntax = setRowField(v, @"Auto syntax limit (bytes):",
+        [NSString stringWithFormat:@"%d", st.AutoSyntaxLimit], 178,
+        @"Automatically apply column colors and result syntax highlighting "
+        @"only when the file is smaller than this size, to prevent freezing "
+        @"on large files.");
+    NSTextField *fQuoteCh = setRowField(v, @"Default quote character:",
+        [NSString stringWithFormat:@"%c", st.DefaultQuoteChar], 150,
+        @"Default quote character, typically double quote \" or single quote '");
+    NSTextField *fNull = setRowField(v, @"Null keyword:",
+        [NSString stringWithUTF8String:st.NullKeyword.c_str()], 122,
+        @"A case-sensitive keyword that will be treated as an empty value, "
+        @"typically NULL, NaN, NA or None depending on your data.");
+    NSButton *cSepColor = setRowCheck(v, @"Separator color:", st.SeparatorColor, 94,
+        @"Include separator in syntax highlighting colors. Set to false and "
+        @"the separator characters are not colored.");
+    NSTextField *fSeps = setRowField(v, @"Separators:",
+        [NSString stringWithUTF8String:
+            csvSettingsEscapeSeparators(st.Separators).c_str()], 66,
+        @"Preferred characters when automatically detecting the separator "
+        @"character. For special characters like tab, use \\t or hexadecimal "
+        @"escape sequence \\u0009 or \\x09.");
+
+    if (!runDialog(win, ctl)) return false;
+
+    auto firstChar = [](NSTextField *f, char dflt) {
+        std::string s = f.stringValue.UTF8String ?: "";
+        return s.empty() ? dflt : s[0];
+    };
+    auto intOr = [](NSTextField *f, int dflt, int minv) {
+        std::string s = f.stringValue.UTF8String ?: "";
+        if (s.empty()) return dflt;
+        int n = atoi(s.c_str());
+        return n < minv ? dflt : n;
+    };
+
+    st.CommentCharacter   = firstChar(fComment, '#');
+    st.DecimalDigitsMax   = intOr(fDecMax, 20, 0);
+    st.DecimalLeadingZero = cLeadZero.state == NSControlStateValueOn;
+    st.ErrorTolerance     = intOr(fErrTol, 1, 0);
+    st.ErrorTolerancePerc = 0.01f * st.ErrorTolerance;
+    st.IntegerDigitsMax   = intOr(fIntMax, 12, 1);
+    st.UniqueValuesMax    = intOr(fUnique, 15, 1);
+    st.YearMaximum        = intOr(fYearMax, 2050, 1);
+    st.YearMinimum        = intOr(fYearMin, 1900, 1);
+    st.ReformatQuotes     = (int)pQuotes.indexOfSelectedItem;
+    st.TrimValues         = cTrim.state == NSControlStateValueOn;
+    csvSettingsApplyTwoDigitYearMax(fYear2.stringValue.UTF8String ?: "");
+    st.AutoSyntaxLimit    = intOr(fSyntax, 1024 * 1024, 1024);
+    st.DefaultQuoteChar   = firstChar(fQuoteCh, '"');
+    st.NullKeyword        = fNull.stringValue.UTF8String ?: "NaN";
+    st.SeparatorColor     = cSepColor.state == NSControlStateValueOn;
+    st.Separators         = csvSettingsUnescapeSeparators(fSeps.stringValue.UTF8String ?: "");
+    return true;
+}

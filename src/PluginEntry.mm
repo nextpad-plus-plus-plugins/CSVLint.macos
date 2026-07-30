@@ -15,6 +15,7 @@
 #include "NppPluginInterfaceMac.h"
 #include "Scintilla.h"
 #import "CsvLintPanel.h"
+#import "CsvSettingsIO.h"
 #include <string>
 #include <cstring>
 
@@ -96,23 +97,30 @@ static void cmdAnalyseReport()    { csvPanelAnalyseReport(); }
 static void cmdSelectColumns()    { csvPanelSelectColumns(); }
 static void cmdConvertData()      { csvPanelConvertData(); }
 static void cmdGenerateMetadata() { csvPanelGenerateMetadata(); }
-static void cmdSettings()         { notImplemented("Settings"); }
+static void cmdSettings()         { csvPanelShowSettings(); }
 
 static void cmdDocumentation() {
+    // Same URL as the Windows plugin's Documentation menu item.
     [[NSWorkspace sharedWorkspace] openURL:
-        [NSURL URLWithString:@"https://github.com/BdR76/CSVLint"]];
+        [NSURL URLWithString:@"https://github.com/BdR76/CSVLint/tree/master/"
+                             @"docs#csv-lint-plug-in-documentation"]];
 }
 
 static void cmdAbout() {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSAlert *a = [NSAlert new];
-        a.messageText = @"CSV Lint " @PLUGIN_VERSION;
+        a.messageText = @"CSV Lint v" @PLUGIN_VERSION;
         a.informativeText =
-            @"CSV Lint plug-in — check syntax, validate data and reformat "
-            @"CSV / fixed-width text files.\n\n"
-            @"Original Windows plugin by Bas de Reuver.\n"
-            @"macOS port for Nextpad++.";
-        [a runModal];
+            @"CSV Lint plug-in — check syntax, validate data, reformat and "
+            @"convert CSV / fixed-width text files.\n\n"
+            @"Original Windows plugin by Bas de Reuver (BdR76).\n"
+            @"macOS port for Nextpad++.\n\n"
+            @"License: GPL-3.0";
+        [a addButtonWithTitle:@"OK"];
+        [a addButtonWithTitle:@"Visit GitHub"];
+        if ([a runModal] == NSAlertSecondButtonReturn)
+            [[NSWorkspace sharedWorkspace] openURL:
+                [NSURL URLWithString:@"https://github.com/BdR76/CSVLint"]];
     });
 }
 
@@ -123,6 +131,8 @@ static void cmdAbout() {
 extern "C" NPP_EXPORT void setInfo(NppData data) {
     nppData = data;
     csvPanelInit(&nppData);
+    csvSettingsIOInit(&nppData);
+    csvSettingsLoad();
 
     int idx = 0;
     auto addItem = [&](const char *name, PFUNCPLUGINCMD func) {
@@ -174,6 +184,7 @@ extern "C" NPP_EXPORT void beNotified(SCNotification *n) {
             break;
 
         case NPPN_SHUTDOWN:
+            csvSettingsSave();   // persist dialog-remembered values
             csvPanelShutdown();
             if (g_panelHandle > 0) {
                 npp(NPPM_DMM_UNREGISTERPANEL, (uintptr_t)g_panelHandle, 0);

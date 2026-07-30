@@ -9,6 +9,7 @@ struct CsvSettings {
     char        CommentCharacter   = '#';
     int         DecimalDigitsMax   = 20;
     bool        DecimalLeadingZero = true;
+    int         ErrorTolerance     = 1;       // percent (persisted form)
     float       ErrorTolerancePerc = 0.01f;   // ErrorTolerance=1 (percent) -> 0.01
     int         IntegerDigitsMax   = 12;
     int         UniqueValuesMax    = 15;
@@ -18,7 +19,9 @@ struct CsvSettings {
     int         ReformatQuotes     = 0;       // 0=minimal 1=spaces 2=strings 3=non-numeric 4=all
     bool        TrimValues         = true;
     int         TwoDigitYearMax    = 0;       // 0 = "CurrentYear" (resolved in ctor)
-    // Convert data / Generate metadata (dialog persistence)
+    std::string TwoDigitYearMaxStr = "CurrentYear";  // persisted form ("CurrentYear" or a year)
+    // Dialog persistence ("UserDialogs" ini section)
+    bool        AutoDetectColumns = true;  // panel "auto-matic" checkbox
     int         DataConvertType  = 0;    // 0=SQL 1=XML 2=JSON
     std::string DataConvertName;         // table name ("" = from file name)
     int         DataConvertSQL   = 0;    // 0=MySQL 1=MS-SQL 2=PostgreSQL
