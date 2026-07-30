@@ -12,11 +12,16 @@ set(NPP_PLUGIN_INCLUDE "${NPP_MACOS_DIR}/src")
 
 add_library(CSVLint SHARED
     src/PluginEntry.mm
+    src/engine/CsvDefinition.cpp
+    src/engine/CsvAnalyze.cpp
+    src/engine/CsvValidate.cpp
+    src/engine/DateTimeMask.cpp
 )
 target_include_directories(CSVLint PRIVATE
     ${NPP_PLUGIN_INCLUDE}
     ${SCINTILLA_INCLUDE}
-    src)
+    src
+    src/engine)
 target_link_libraries(CSVLint PRIVATE
     "-framework Cocoa")
 set_target_properties(CSVLint PROPERTIES PREFIX "" SUFFIX ".dylib")
