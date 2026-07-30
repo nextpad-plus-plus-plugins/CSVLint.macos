@@ -1,0 +1,181 @@
+// CSVLint.macos — macOS port of the CSV Lint plug-in for Notepad++
+// (original Windows plugin by Bas de Reuver, https://github.com/BdR76/CSVLint —
+// C#/WinForms; this port is a rewrite against the Nextpad++ macOS plugin API).
+//
+// PluginEntry.mm — plugin contract: menu items (mirroring the Windows menu
+// 1:1), docked-panel registration, notification routing, settings lifecycle.
+//
+// Column coloring note: the Windows plugin ships a managed ILexer and
+// registers "CSVLint" as an external language. The macOS host has no
+// external-lexer machinery, so this port colors columns with Scintilla
+// INDICATORS instead (the ComparePlus pattern) — self-contained, no host
+// changes, coexists with whatever lexer owns the buffer.
+
+#import <Cocoa/Cocoa.h>
+#include "NppPluginInterfaceMac.h"
+#include "Scintilla.h"
+#include <string>
+#include <cstring>
+
+#define PLUGIN_NAME    "CSV Lint"
+#define PLUGIN_VERSION "0.1.0"
+static const int NB_FUNC = 11;
+
+static NppData  nppData;
+static FuncItem funcItem[NB_FUNC];
+
+static uint64_t g_panelHandle  = 0;
+static NSView  *sPanelView     = nil;
+static bool     sPanelVisible  = false;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Host helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+static intptr_t npp(uint32_t msg, uintptr_t w = 0, intptr_t l = 0) {
+    return nppData._sendMessage(nppData._nppHandle, msg, w, l);
+}
+
+static NppHandle getCurScintilla() {
+    int which = -1;
+    npp(NPPM_GETCURRENTSCINTILLA, 0, (intptr_t)&which);
+    return (which == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+}
+
+static intptr_t sci(uint32_t msg, uintptr_t w = 0, intptr_t l = 0) {
+    return nppData._sendMessage(getCurScintilla(), msg, w, l);
+}
+
+static void notImplemented(const char *what) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSAlert *a = [NSAlert new];
+        a.messageText = @PLUGIN_NAME;
+        a.informativeText = [NSString stringWithFormat:
+            @"\"%s\" is not implemented yet in this port preview.", what];
+        [a runModal];
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Docked panel (placeholder — real UI lands in the panel phase)
+// ═══════════════════════════════════════════════════════════════════════════
+
+static void ensurePanelView() {
+    if (sPanelView) return;
+    sPanelView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 700, 240)];
+    NSTextField *label = [NSTextField labelWithString:@"CSV Lint — panel under construction"];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.textColor = [NSColor secondaryLabelColor];
+    [sPanelView addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[
+        [label.centerXAnchor constraintEqualToAnchor:sPanelView.centerXAnchor],
+        [label.centerYAnchor constraintEqualToAnchor:sPanelView.centerYAnchor],
+    ]];
+}
+
+static bool panelIsShown() {
+    return sPanelView && sPanelView.window != nil && !sPanelView.hiddenOrHasHiddenAncestor;
+}
+
+static void toggleLintWindow() {
+    ensurePanelView();
+    if (g_panelHandle == 0) {
+        intptr_t h = npp(NPPM_DMM_REGISTERPANEL,
+                         (uintptr_t)(__bridge void *)sPanelView,
+                         (intptr_t)"CSV Lint");
+        if (h > 0) g_panelHandle = (uint64_t)h;
+    }
+    if (g_panelHandle == 0) { notImplemented("CSV Lint window (docking unavailable)"); return; }
+
+    bool targetShown = !panelIsShown();
+    sPanelVisible = targetShown;
+    npp(NPPM_SETMENUITEMCHECK, (uintptr_t)funcItem[0]._cmdID, targetShown ? 1 : 0);
+    npp(targetShown ? NPPM_DMM_SHOWPANEL : NPPM_DMM_HIDEPANEL, (uintptr_t)g_panelHandle, 0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Menu commands (stubs where the phase hasn't landed yet)
+// ═══════════════════════════════════════════════════════════════════════════
+
+static void cmdLintWindow()       { toggleLintWindow(); }
+static void cmdAnalyseReport()    { notImplemented("Analyse data report"); }
+static void cmdSelectColumns()    { notImplemented("Select columns"); }
+static void cmdConvertData()      { notImplemented("Convert data"); }
+static void cmdGenerateMetadata() { notImplemented("Generate metadata"); }
+static void cmdSettings()         { notImplemented("Settings"); }
+
+static void cmdDocumentation() {
+    [[NSWorkspace sharedWorkspace] openURL:
+        [NSURL URLWithString:@"https://github.com/BdR76/CSVLint"]];
+}
+
+static void cmdAbout() {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSAlert *a = [NSAlert new];
+        a.messageText = @"CSV Lint " @PLUGIN_VERSION;
+        a.informativeText =
+            @"CSV Lint plug-in — check syntax, validate data and reformat "
+            @"CSV / fixed-width text files.\n\n"
+            @"Original Windows plugin by Bas de Reuver.\n"
+            @"macOS port for Nextpad++.";
+        [a runModal];
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Plugin contract
+// ═══════════════════════════════════════════════════════════════════════════
+
+extern "C" NPP_EXPORT void setInfo(NppData data) {
+    nppData = data;
+
+    int idx = 0;
+    auto addItem = [&](const char *name, PFUNCPLUGINCMD func) {
+        strlcpy(funcItem[idx]._itemName, name, NPP_MENU_ITEM_SIZE);
+        funcItem[idx]._pFunc = func;
+        funcItem[idx]._init2Check = false;
+        funcItem[idx]._pShKey = nullptr;
+        idx++;
+    };
+    auto addSep = [&]() { addItem("", nullptr); };
+
+    // 1:1 with the Windows plugin's menu (Main.cs SetCommand table).
+    addItem("CSV Lint window",     cmdLintWindow);        // 0
+    addSep();                                             // 1
+    addItem("Analyse data report", cmdAnalyseReport);     // 2
+    addItem("Select columns",      cmdSelectColumns);     // 3
+    addSep();                                             // 4
+    addItem("Convert data",        cmdConvertData);       // 5
+    addItem("Generate metadata",   cmdGenerateMetadata);  // 6
+    addSep();                                             // 7
+    addItem("Settings",            cmdSettings);          // 8
+    addItem("Documentation",       cmdDocumentation);     // 9
+    addItem("About",               cmdAbout);             // 10
+}
+
+extern "C" NPP_EXPORT const char *getName() {
+    return PLUGIN_NAME;
+}
+
+extern "C" NPP_EXPORT FuncItem *getFuncsArray(int *nbF) {
+    *nbF = NB_FUNC;
+    return funcItem;
+}
+
+extern "C" NPP_EXPORT void beNotified(SCNotification *n) {
+    switch (n->nmhdr.code) {
+        case NPPN_SHUTDOWN:
+            if (g_panelHandle > 0) {
+                npp(NPPM_DMM_UNREGISTERPANEL, (uintptr_t)g_panelHandle, 0);
+                g_panelHandle = 0;
+            }
+            sPanelView = nil;
+            break;
+        default:
+            break;
+    }
+}
+
+extern "C" NPP_EXPORT intptr_t messageProc(uint32_t, uintptr_t, intptr_t) {
+    return 1;
+}
