@@ -12,6 +12,8 @@ set(NPP_PLUGIN_INCLUDE "${NPP_MACOS_DIR}/src")
 
 add_library(CSVLint SHARED
     src/PluginEntry.mm
+    src/CsvLintPanel.mm
+    src/engine/CsvSchemaIni.cpp
     src/engine/CsvDefinition.cpp
     src/engine/CsvAnalyze.cpp
     src/engine/CsvValidate.cpp

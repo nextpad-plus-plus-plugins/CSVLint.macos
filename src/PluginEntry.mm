@@ -14,6 +14,7 @@
 #import <Cocoa/Cocoa.h>
 #include "NppPluginInterfaceMac.h"
 #include "Scintilla.h"
+#import "CsvLintPanel.h"
 #include <string>
 #include <cstring>
 
@@ -62,15 +63,7 @@ static void notImplemented(const char *what) {
 
 static void ensurePanelView() {
     if (sPanelView) return;
-    sPanelView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 700, 240)];
-    NSTextField *label = [NSTextField labelWithString:@"CSV Lint — panel under construction"];
-    label.translatesAutoresizingMaskIntoConstraints = NO;
-    label.textColor = [NSColor secondaryLabelColor];
-    [sPanelView addSubview:label];
-    [NSLayoutConstraint activateConstraints:@[
-        [label.centerXAnchor constraintEqualToAnchor:sPanelView.centerXAnchor],
-        [label.centerYAnchor constraintEqualToAnchor:sPanelView.centerYAnchor],
-    ]];
+    sPanelView = csvPanelView();
 }
 
 static bool panelIsShown() {
@@ -91,6 +84,7 @@ static void toggleLintWindow() {
     sPanelVisible = targetShown;
     npp(NPPM_SETMENUITEMCHECK, (uintptr_t)funcItem[0]._cmdID, targetShown ? 1 : 0);
     npp(targetShown ? NPPM_DMM_SHOWPANEL : NPPM_DMM_HIDEPANEL, (uintptr_t)g_panelHandle, 0);
+    if (targetShown) csvPanelOnBufferActivated();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -128,6 +122,7 @@ static void cmdAbout() {
 
 extern "C" NPP_EXPORT void setInfo(NppData data) {
     nppData = data;
+    csvPanelInit(&nppData);
 
     int idx = 0;
     auto addItem = [&](const char *name, PFUNCPLUGINCMD func) {
@@ -164,7 +159,22 @@ extern "C" NPP_EXPORT FuncItem *getFuncsArray(int *nbF) {
 
 extern "C" NPP_EXPORT void beNotified(SCNotification *n) {
     switch (n->nmhdr.code) {
+        case NPPN_READY:
+        case NPPN_BUFFERACTIVATED:
+            csvPanelOnBufferActivated();
+            break;
+
+        case NPPN_FILECLOSED:
+            csvPanelOnFileClosed((uintptr_t)n->nmhdr.idFrom);
+            break;
+
+        case SCN_MODIFIED:
+            if (n->modificationType & (SC_MOD_INSERTTEXT | SC_MOD_DELETETEXT))
+                csvPanelOnModified();
+            break;
+
         case NPPN_SHUTDOWN:
+            csvPanelShutdown();
             if (g_panelHandle > 0) {
                 npp(NPPM_DMM_UNREGISTERPANEL, (uintptr_t)g_panelHandle, 0);
                 g_panelHandle = 0;
