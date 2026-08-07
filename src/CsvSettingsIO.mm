@@ -150,6 +150,7 @@ void csvSettingsLoad(void) {
     if (st.DataConvertBatch < 1) st.DataConvertBatch = 1;
     if (has("DataConvertName")) st.DataConvertName = str("DataConvertName");
     st.DataConvertSQL     = num("DataConvertSQL", st.DataConvertSQL);
+    st.DataConvertStyle   = num("DataConvertStyle", st.DataConvertStyle);
     st.DataConvertType    = num("DataConvertType", st.DataConvertType);
     st.MetadataType       = num("MetadataType", st.MetadataType);
 }
@@ -189,6 +190,7 @@ void csvSettingsSave(void) {
     s += "DataConvertBatch=" + std::to_string(st.DataConvertBatch) + "\r\n";
     s += "DataConvertName=" + st.DataConvertName + "\r\n";
     s += "DataConvertSQL=" + std::to_string(st.DataConvertSQL) + "\r\n";
+    s += "DataConvertStyle=" + std::to_string(st.DataConvertStyle) + "\r\n";
     s += "DataConvertType=" + std::to_string(st.DataConvertType) + "\r\n";
     s += "MetadataType=" + std::to_string(st.MetadataType) + "\r\n";
 

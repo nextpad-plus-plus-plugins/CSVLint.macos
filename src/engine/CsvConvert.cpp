@@ -1,4 +1,5 @@
 #include "CsvConvert.h"
+#include <cstdio>
 #include "CsvValidate.h"
 #include "CsvEdit.h"
 #include "DateTimeMask.h"
@@ -103,6 +104,7 @@ std::string CsvConvert::ToSQL(const std::string &text, CsvDefinition &csvdef,
     std::string TABLE_NAME = opt.tableName.empty()
                                  ? CsvEdit::StringToVariable(opt.fileNameNoExt)
                                  : opt.tableName;
+    std::string constr_table = TABLE_NAME;   // pre-quoting, for constraint names
     TABLE_NAME = SQLSafeName(TABLE_NAME, dialect);
 
     std::string SQL_TYPE = dialect <= 1 ? (dialect == 0 ? "MySQL / MariaDB" : "MS-SQL")
@@ -126,7 +128,8 @@ std::string CsvConvert::ToSQL(const std::string &text, CsvDefinition &csvdef,
         CsvColumn &fld = csvdef.Fields[r];
         std::string sqlname = SQLSafeName(fld.Name, dialect);
 
-        std::string sqltype = "varchar", widunk, comm;
+        std::string sqltype = "varchar", comm;
+        std::string widunk = r == 0 ? " -- NOT NULL" : "";
         if (fld.DataType == ColumnType::Integer) sqltype = "integer";
         if (fld.DataType == ColumnType::DateTime)
             sqltype = dialect < 2 ? "datetime" : "timestamp";
@@ -149,6 +152,21 @@ std::string CsvConvert::ToSQL(const std::string &text, CsvDefinition &csvdef,
         if (r < csvdef.Fields.size() - 1) {
             sb += "\r\n\t";
             cols += ",\r\n\t";
+        }
+
+        // Constraint examples: primary key + unique for the first column.
+        // (Upstream hardcodes its test table "cardio" here — fixed to TABLE_NAME.)
+        if (r == 0) {
+            std::string pk_name =
+                SQLSafeName(CsvEdit::StringToVariable("PK_" + constr_table + "_" + fld.Name), dialect);
+            std::string uq_name =
+                SQLSafeName(CsvEdit::StringToVariable("UQ_" + constr_table + "_" + fld.Name), dialect);
+            enumcols1 += "ALTER TABLE " + TABLE_NAME + " ADD CONSTRAINT " + pk_name +
+                         " PRIMARY KEY(" + sqlname +
+                         "); --note: pk column(s) must also be NOT NULL\r\n";
+            enumcols1 += "ALTER TABLE " + TABLE_NAME + " ADD CONSTRAINT " + uq_name +
+                         " UNIQUE(" + sqlname +
+                         "); --any column(s) that should be unique\r\n\r\n";
         }
 
         // Enum columns
@@ -211,9 +229,6 @@ std::string CsvConvert::ToSQL(const std::string &text, CsvDefinition &csvdef,
 
     if (dialect == 0) sb += "\r\n\tprimary key(" + recidname + ")";
     sb += "\r\n);\r\n";
-
-    if (!enumcols1.empty())
-        sb += "-- Enumeration columns (optional)\r\n/*\r\n" + enumcols1 + enumcols2 + "*/\r\n";
 
     TextReader strdata(text);
     long lineCount = csvdef.ColNameHeader ? -1 : 0;
@@ -289,9 +304,15 @@ std::string CsvConvert::ToSQL(const std::string &text, CsvDefinition &csvdef,
         sb.insert((size_t)batchcomm,
                   std::to_string(batchstart) + " - " + std::to_string(lineCount));
 
+    // Example constraints and enumeration check constraints
+    sb += "\r\n-- -------------------------------------\r\n";
+    sb += "-- Add extra table constraints (optional)\r\n";
+    sb += "-- -------------------------------------\r\n";
+    sb += "/*\r\n" + enumcols1 + enumcols2 + "*/\r\n";
+
     sb += "\r\n-- -------------------------------------\r\n";
     sb += "-- Add comments (recommended, especially when archiving)\r\n";
-    sb += "-- -------------------------------------\r\n\r\n";
+    sb += "-- -------------------------------------\r\n";
 
     std::vector<std::string> comment = opt.commentLines;
     comment.insert(comment.begin(), "Table imported using");
@@ -478,5 +499,229 @@ std::string CsvConvert::ToJSON(const std::string &text, CsvDefinition &csvdef,
     }
 
     sb += "\r\n\t]\r\n}\r\n";
+    return sb;
+}
+
+// ── HTML ────────────────────────────────────────────────────────────────────
+
+static std::string hex6(int rgb) {
+    char buf[8];
+    snprintf(buf, sizeof buf, "%06X", rgb & 0xFFFFFF);
+    return buf;
+}
+
+/// Port of CsvEdit.cs generateCSS. Style 4 takes its palette from
+/// opt.columnColors/defaultFg/defaultBg instead of reading lexer styles.
+static std::string generateCSS(const CsvDefinition &csvdef, int style_idx,
+                               const CsvConvertOptions &opt) {
+    // none, no style
+    if (style_idx == 0) return "";
+
+    std::string style_str =
+        "\t<style type=\"text/css\">\r\n"
+        "body {\r\n"
+        "\tfont-family: Arial, Helvetica, sans-serif;\r\n"
+        "\tbackground: #fff;\r\n"
+        "\tcolor: #000;\r\n"
+        "}\r\n"
+        "\r\n"
+        "/* Table structure */\r\n"
+        ".csvlint-table {\r\n"
+        "\tborder-collapse: collapse;\r\n"
+        "}\r\n"
+        "\r\n"
+        "/* Column headers */\r\n"
+        ".csvlint-table thead th {\r\n"
+        "\tbackground: #dbeafe;\r\n"
+        "\tpadding: 8px 12px;\r\n"
+        "\tborder-bottom: 2px solid #9bbce3;\r\n"
+        "}\r\n"
+        "\r\n"
+        "/* Table cells */\r\n"
+        ".csvlint-table td {\r\n"
+        "\tpadding: 8px 12px;\r\n"
+        "\tborder-bottom: 1px solid #ddd;\r\n"
+        "\twhite-space: nowrap;\r\n"
+        "}\r\n"
+        "\r\n"
+        "/* rows columns */\r\n";
+
+    std::string hl_clr = "#eef5ff";
+
+    switch (style_idx) {
+        case 1:   // minimal UI
+            style_str = repl(style_str, "font-family: ",
+                             "font-family: system-ui, -apple-system, \"Segoe UI\", Roboto, ");
+            style_str = repl(style_str, "background: #dbeafe;\r\n", "font-weight: 600;\r\n");
+            style_str = repl(style_str, "solid #9bbce3;\r\n", "solid #000;\r\n");
+            style_str = repl(style_str, "/* rows columns */\r\n", "");
+            break;
+        case 2:   // zebra rows
+            style_str = repl(style_str, "/* rows columns */\r\n",
+                             "/* Zebra rows */\r\n.csvlint-table tr:nth-child(even) {\r\n"
+                             "\tbackground: #f6f9fc;\r\n}\r\n\r\n");
+            break;
+        case 3:   // zebra columns
+            style_str = repl(style_str, "/* rows columns */\r\n",
+                             "/* Zebra columns */\r\n.csvlint-table td:nth-child(even) {\r\n"
+                             "\tbackground: #f6f9fc;\r\n}\r\n\r\n");
+            break;
+        case 4: {  // CSV Lint colors (palette supplied by the host)
+            int colmax = (int)opt.columnColors.size();
+
+            std::string csscolors = "/* CSV Lint columns */\r\n";
+            for (int i = 1; i <= colmax; i++) {
+                std::string hexclr  = "color: #" + hex6(opt.columnColors[i - 1].first) + ";";
+                std::string hexback = "background: #" + hex6(opt.columnColors[i - 1].second) + ";";
+                std::string padspace = i < 10 ? " " : "";
+                csscolors += ".csvlint-table th:nth-child(" + std::to_string(colmax) + "n+" +
+                             std::to_string(i) + "), " + padspace +
+                             ".csvlint-table td:nth-child(" + std::to_string(colmax) + "n+" +
+                             std::to_string(i) + ") " + padspace +
+                             "{" + hexclr + hexback + "}\r\n";
+            }
+
+            // background/foreground could be either light-mode or dark-mode
+            style_str = repl(style_str, "background: #fff;\r\n",
+                             "background: #" + hex6(opt.defaultBg) + ";\r\n");
+            style_str = repl(style_str, "color: #000;\r\n",
+                             "color: #" + hex6(opt.defaultFg) + ";\r\n");
+            style_str = repl(style_str, "solid #9bbce3;\r\n", "solid #ddd;\r\n");
+
+            style_str = repl(style_str, "\tbackground: #dbeafe;\r\n", "");
+            if (opt.defaultFg > 0x808080) hl_clr = "#110a00";
+            style_str = repl(style_str, "/* rows columns */", csscolors);
+            break;
+        }
+    }
+
+    // right-align any numeric columns
+    std::vector<int> num;
+    for (size_t i = 0; i < csvdef.Fields.size(); i++)
+        if (csvdef.Fields[i].DataType == ColumnType::Decimal ||
+            csvdef.Fields[i].DataType == ColumnType::Integer)
+            num.push_back((int)i + 1);
+    if (!num.empty()) {
+        style_str += "/* Numeric columns */\r\n";
+        for (size_t i = 0; i < num.size(); i++) {
+            std::string end = i == num.size() - 1 ? " {" : ",";
+            style_str += ".csvlint-table td:nth-child(" + std::to_string(num[i]) + ")" +
+                         end + "\r\n";
+        }
+        style_str += "\ttext-align: right;\r\n}\r\n";
+    }
+
+    // hover highlight, except not for Minimal UI
+    if (style_idx != 1)
+        style_str += "\r\n/* Optional hover highlight */\r\n"
+                     ".csvlint-table tbody tr:hover td {\r\n\tbackground: " +
+                     hl_clr + ";\r\n}\r\n";
+
+    style_str += "\t</style>\r\n";
+    return style_str;
+}
+
+std::string CsvConvert::ToHTML(const std::string &text, CsvDefinition &csvdef,
+                               const CsvConvertOptions &opt) {
+    std::string sb;
+
+    std::string TABLE_NAME = opt.fileName;   // document title
+    int HTML_BATCH_SIZE = opt.batchSize > 0 ? opt.batchSize : 1000;
+
+    std::string cssstyle = generateCSS(csvdef, opt.cssStyle, opt);
+
+    sb += "<!DOCTYPE html>\r\n<html>\r\n<head>\r\n";
+    sb += "\t<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">\r\n";
+    sb += "\t<meta name=\"generator\" content=\"" +
+          (opt.commentLines.empty() ? "" : opt.commentLines[0]) + "\">\r\n";
+    sb += "\t<title>" + TABLE_NAME + "</title>\r\n";
+    sb += cssstyle;
+    sb += "</head>\r\n";
+
+    sb += "<body>\r\n<p>\r\n";
+    for (auto &str : opt.commentLines) sb += str + "<br/>\r\n";
+    sb += "</p>\r\n";
+
+    TextReader strdata(text);
+
+    // html table headers
+    std::string htmlTableStart = "<table class=\"csvlint-table\">\r\n\t<thead>\r\n\t\t<tr>\r\n";
+    for (auto &f : csvdef.Fields)
+        htmlTableStart += "\t\t\t<th>" + f.Name + "</th>\r\n";
+    htmlTableStart += "\t\t</tr>\r\n\t</thead>\r\n";
+
+    long lineCount = csvdef.ColNameHeader ? -1 : 0;
+    long batchcomm = -1;
+    long batchstart = 1;
+
+    // copy any comment lines (upstream emits invalid `</br>` here — fixed)
+    if (csvdef.SkipLines > 0) {
+        sb += "<p>\r\n";
+        copyCommentsAtStart(csvdef, strdata, sb, "", "<br/>\r\n");
+        sb += "</p>\r\n";
+    }
+
+    while (!strdata.EndOfStream()) {
+        bool iscomm = false;
+        std::vector<std::string> list = csvdef.ParseNextLine(strdata, iscomm);
+
+        if (iscomm) {
+            if (!list.empty()) sb += "<p>" + list[0] + "</p>\n";
+            continue;
+        }
+
+        if (lineCount >= 0) {
+            if (lineCount % HTML_BATCH_SIZE == 0) {
+                // close previous batch table (upstream also closes </body></html>
+                // mid-document here — fixed to just the table)
+                if (lineCount > 0) sb += "\t</tbody>\r\n</table>\r\n";
+
+                if (batchcomm > -1 && HTML_BATCH_SIZE > 1) {
+                    sb.insert((size_t)batchcomm, std::to_string(batchstart) + " - " +
+                                                     std::to_string(lineCount));
+                    batchstart = lineCount + 1;
+                }
+
+                // repeat count-comment per batch, or when batch==1 add it only once
+                if (HTML_BATCH_SIZE > 1 || batchcomm == -1) {
+                    sb += "<p>HTML table, records </p>\r\n";
+                    batchcomm = (long)sb.size() - 6;   // before "</p>\r\n"
+                }
+
+                sb += htmlTableStart;
+                sb += "\t<tbody>\r\n";
+            }
+
+            sb += "\t\t<tr>\r\n";
+            for (size_t col = 0; col < csvdef.Fields.size(); col++) {
+                std::string colvalue = col < list.size() ? list[col] : "";
+                colvalue = cleanValue(colvalue);
+
+                // display csv values as-is, don't convert date or decimals
+                if (colvalue.empty()) {
+                    sb += "\t\t\t<td/>\r\n";
+                } else {
+                    colvalue = repl(colvalue, "&", "&amp;");
+                    colvalue = repl(colvalue, "<", "&lt;");
+                    colvalue = repl(colvalue, ">", "&gt;");
+                    colvalue = repl(colvalue, "\r\n", "<br/>");
+                    colvalue = repl(colvalue, "\n", "<br/>");
+                    colvalue = repl(colvalue, "\r", "<br/>");
+                    sb += "\t\t\t<td>" + colvalue + "</td>\r\n";
+                }
+            }
+            sb += "\t\t</tr>\r\n";
+        }
+        lineCount++;
+    }
+
+    // finalise document
+    sb += "\t</tbody>\r\n</table>\r\n</body>\r\n</html>\r\n";
+
+    // batch comment, insert record count of any last remaining batch
+    if (batchcomm > -1)
+        sb.insert((size_t)batchcomm,
+                  std::to_string(batchstart) + " - " + std::to_string(lineCount));
+
     return sb;
 }

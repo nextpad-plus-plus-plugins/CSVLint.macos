@@ -456,6 +456,26 @@ int main() {
               "sql: last row ends with semicolon");
         CHECK(sql.find("-- insert records 1 - 2\r\n") != std::string::npos,
               "sql: batch comment with record count");
+        CHECK(sql.find("Id integer, -- NOT NULL") != std::string::npos,
+              "sql: first column NOT NULL hint");
+        CHECK(sql.find("ALTER TABLE unit_test ADD CONSTRAINT PK_unit_test_Id "
+                       "PRIMARY KEY(Id); --note: pk column(s) must also be NOT NULL")
+                  != std::string::npos,
+              "sql: PK suggestion uses real table name (not upstream 'cardio')");
+        CHECK(sql.find("ALTER TABLE unit_test ADD CONSTRAINT UQ_unit_test_Id "
+                       "UNIQUE(Id); --any column(s) that should be unique")
+                  != std::string::npos,
+              "sql: UNIQUE suggestion");
+        CHECK(sql.find("cardio") == std::string::npos, "sql: no hardcoded cardio");
+        CHECK(sql.find("-- Add extra table constraints (optional)") != std::string::npos &&
+              sql.find("-- Add extra table constraints (optional)") >
+                  sql.rfind("INSERT INTO"),
+              "sql: constraints block after the inserts");
+        CHECK(sql.find("-- Enumeration columns (optional)") == std::string::npos,
+              "sql: old pre-data enum block removed");
+        CHECK(sql.find("-- -------------------------------------\r\n-- Table comment\r\n")
+                  != std::string::npos,
+              "sql: comments header directly before table comment (0.4.8 spacing)");
 
         CsvDefinition dxml = d;
         std::string xml = CsvConvert::ToXML(text, dxml, opt);
@@ -471,6 +491,135 @@ int main() {
         CHECK(json.find("\"Amt\": 2.5,") != std::string::npos, "json: bare decimal");
         CHECK(json.find("\"When\": \"2020-01-31T00:00:00\"") != std::string::npos,
               "json: datetime quoted iso");
+    }
+
+    // ── CsvConvert: HTML table (0.4.8 feature) ──────────────────────────────
+    {
+        std::string err;
+        CsvDefinition d = CsvDefinition::FromIniLines(
+            "Format=CSVDelimited\nColNameHeader=True\nDateTimeFormat=yyyy-mm-dd\n"
+            "DecimalSymbol=.\nNumberDigits=1\n"
+            "Col1=Id Integer Width 3\nCol2=Name Text Width 8\n"
+            "Col3=Amt Float Width 6\nCol4=When DateTime Width 10\n", &err);
+        std::string text = "Id,Name,Amt,When\n"
+                           "1,Bob's,2.5,2020-01-31\n"
+                           "2,,3.5,2020-02-15\n"
+                           "3,a<b>&c,4.5,2020-03-01\n";
+        CsvConvertOptions opt;
+        opt.fileNameNoExt = "unit test";
+        opt.fileName = "unit.csv";
+        opt.commentLines = {"Nextpad++ CSV Lint plug-in", "File: unit.csv"};
+
+        // style 0 = no CSS
+        opt.cssStyle = 0;
+        CsvDefinition d0 = d;
+        std::string html = CsvConvert::ToHTML(text, d0, opt);
+        CHECK(html.rfind("<!DOCTYPE html>\r\n<html>\r\n<head>\r\n", 0) == 0,
+              "html: document prolog");
+        CHECK(html.find("<title>unit.csv</title>") != std::string::npos, "html: title");
+        CHECK(html.find("<meta name=\"generator\" content=\"Nextpad++ CSV Lint plug-in\">")
+                  != std::string::npos,
+              "html: generator meta");
+        CHECK(html.find("<style") == std::string::npos, "html: style 0 emits no CSS");
+        CHECK(html.find("\t\t\t<th>Id</th>\r\n") != std::string::npos &&
+              html.find("\t\t\t<th>When</th>\r\n") != std::string::npos,
+              "html: thead column headers");
+        CHECK(html.find("\t\t\t<td>Bob's</td>\r\n") != std::string::npos,
+              "html: plain value as-is");
+        CHECK(html.find("\t\t\t<td>2020-01-31</td>\r\n") != std::string::npos,
+              "html: date not converted");
+        CHECK(html.find("\t\t\t<td/>\r\n") != std::string::npos, "html: empty cell <td/>");
+        CHECK(html.find("<td>a&lt;b&gt;&amp;c</td>") != std::string::npos,
+              "html: & < > escaped");
+        CHECK(html.find("<p>HTML table, records 1 - 3</p>") != std::string::npos,
+              "html: record count label");
+        size_t firstHtmlEnd = html.find("</html>");
+        CHECK(firstHtmlEnd != std::string::npos && html.rfind("</html>") == firstHtmlEnd,
+              "html: exactly one </html>");
+        CHECK(html.find("</body>\r\n</html>\r\n") == html.size() - 18,
+              "html: document ends with body+html close");
+
+        // batch size 2 = per-batch labels; batch size 1 = single label (upstream:
+        // "when batch==1 then add count-comment only once at the start")
+        opt.batchSize = 2;
+        CsvDefinition d1 = d;
+        std::string hb = CsvConvert::ToHTML(text, d1, opt);
+        CHECK(hb.find("<p>HTML table, records 1 - 2</p>") != std::string::npos &&
+              hb.find("<p>HTML table, records 3 - 3</p>") != std::string::npos,
+              "html: per-batch record labels");
+        {
+            int tables = 0;
+            for (size_t p = hb.find("<table"); p != std::string::npos;
+                 p = hb.find("<table", p + 1))
+                tables++;
+            size_t e1 = hb.find("</html>");
+            CHECK(tables == 2, "html: two batch tables");
+            CHECK(e1 != std::string::npos && hb.rfind("</html>") == e1,
+                  "html: batching closes tables only (no mid-doc </html>)");
+        }
+        opt.batchSize = 1;
+        CsvDefinition d1b = d;
+        std::string hb1 = CsvConvert::ToHTML(text, d1b, opt);
+        CHECK(hb1.find("<p>HTML table, records 1 - 3</p>") != std::string::npos &&
+              hb1.find("HTML table, records ") == hb1.rfind("HTML table, records "),
+              "html: batch==1 single label covering all records");
+        opt.batchSize = 1000;
+
+        // style 1 = Minimal UI
+        opt.cssStyle = 1;
+        CsvDefinition dm = d;
+        std::string hm = CsvConvert::ToHTML(text, dm, opt);
+        CHECK(hm.find("font-family: system-ui, -apple-system, \"Segoe UI\", Roboto, "
+                      "Arial, Helvetica, sans-serif;") != std::string::npos,
+              "html css1: system font stack");
+        CHECK(hm.find("font-weight: 600;") != std::string::npos &&
+              hm.find("#dbeafe") == std::string::npos,
+              "html css1: bold headers instead of tinted");
+        CHECK(hm.find("solid #000;") != std::string::npos, "html css1: black underline");
+        CHECK(hm.find("Optional hover highlight") == std::string::npos,
+              "html css1: no hover block");
+        CHECK(hm.find("/* Numeric columns */\r\n.csvlint-table td:nth-child(1),\r\n"
+                      ".csvlint-table td:nth-child(3) {\r\n\ttext-align: right;\r\n}")
+                  != std::string::npos,
+              "html css: numeric columns right-aligned");
+
+        // style 2 / 3 = zebra
+        opt.cssStyle = 2;
+        CsvDefinition dz = d;
+        std::string hz = CsvConvert::ToHTML(text, dz, opt);
+        CHECK(hz.find("/* Zebra rows */\r\n.csvlint-table tr:nth-child(even)")
+                  != std::string::npos,
+              "html css2: zebra rows");
+        CHECK(hz.find(".csvlint-table tbody tr:hover td {\r\n\tbackground: #eef5ff;")
+                  != std::string::npos,
+              "html css2: hover highlight default color");
+        opt.cssStyle = 3;
+        CsvDefinition dz2 = d;
+        CHECK(CsvConvert::ToHTML(text, dz2, opt)
+                      .find("/* Zebra columns */\r\n.csvlint-table td:nth-child(even)")
+                  != std::string::npos,
+              "html css3: zebra columns");
+
+        // style 4 = CSV Lint colors (host-supplied palette, dark editor)
+        opt.cssStyle = 4;
+        opt.defaultFg = 0xEEEEEE;
+        opt.defaultBg = 0x1E1E1E;
+        for (int i = 0; i < 12; i++) opt.columnColors.push_back({0xEEEEEE, 0x203040 + i});
+        CsvDefinition dc = d;
+        std::string hc = CsvConvert::ToHTML(text, dc, opt);
+        CHECK(hc.find("background: #1E1E1E;") != std::string::npos &&
+              hc.find("color: #EEEEEE;") != std::string::npos,
+              "html css4: body colors from editor defaults");
+        CHECK(hc.find(".csvlint-table th:nth-child(12n+1),  "
+                      ".csvlint-table td:nth-child(12n+1)  "
+                      "{color: #EEEEEE;background: #203040;}") != std::string::npos,
+              "html css4: column color rule (padded, slot 1)");
+        CHECK(hc.find("nth-child(12n+12)") != std::string::npos,
+              "html css4: 12-slot palette cycles");
+        CHECK(hc.find("#dbeafe") == std::string::npos && hc.find("solid #ddd;") != std::string::npos,
+              "html css4: header tint removed, neutral border");
+        CHECK(hc.find("tr:hover td {\r\n\tbackground: #110a00;") != std::string::npos,
+              "html css4: dark-mode hover color (light fg)");
     }
 
     // ── CsvGenerateCode: 6 metadata/script generators ───────────────────────
@@ -570,6 +719,20 @@ int main() {
         CHECK(ps.find("$Status_array = @(\"OK\", \"NOK\")") != std::string::npos &&
               ps.find("!($Status_array -contains $row.Status)") != std::string::npos,
               "gen ps: enum array + containment check");
+
+        // 0.4.8: "Export new csv" section header replaces the bare comment
+        const std::string expHdr = "# --------------------------------------\r\n"
+                                   "# Export new csv\r\n"
+                                   "# --------------------------------------\r\n";
+        CHECK(py.find(expHdr) != std::string::npos &&
+              py.find("# csv write new output") == std::string::npos,
+              "gen py: Export new csv header");
+        CHECK(r.find(expHdr) != std::string::npos &&
+              r.find("# csv write new output") == std::string::npos,
+              "gen r: Export new csv header");
+        CHECK(ps.find(expHdr) != std::string::npos &&
+              ps.find("# csv write new output") == std::string::npos,
+              "gen ps: Export new csv header");
     }
 
     printf(gFail ? "== %d FAILURE(S) ==\n" : "== ALL PASS ==\n", gFail);

@@ -825,21 +825,46 @@ void csvPanelConvertData(void) {
     std::string tableName = st.DataConvertName;
     int dialect = st.DataConvertSQL;
     int batch = st.DataConvertBatch;
-    if (!csvDlgDataConvert(type, tableName, dialect, batch)) return;
+    int cssStyle = st.DataConvertStyle;
+    if (!csvDlgDataConvert(type, tableName, dialect, batch, cssStyle)) return;
     st.DataConvertType = type;
     st.DataConvertName = tableName;
     st.DataConvertSQL = dialect;
     st.DataConvertBatch = batch;
+    st.DataConvertStyle = cssStyle;
 
     CsvConvertOptions opt;
     opt.sqlDialect = dialect;
     opt.batchSize = batch;
     opt.tableName = tableName;
+    opt.cssStyle = cssStyle;
     size_t slash = path.rfind('/');
     std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
     size_t dot = base.rfind('.');
     opt.fileNameNoExt = dot == std::string::npos ? base : base.substr(0, dot);
+    opt.fileName = base;
     opt.commentLines = {"Nextpad++ CSV Lint plug-in", "File: " + base};
+
+    if (type == 3 && cssStyle == 4) {
+        // "CSV Lint colors": Windows reads its lexer styles; here the columns
+        // are indicator tints, so blend the palette over the editor background
+        // at the alpha the indicators use and hand the result to the engine.
+        bool dark = npp(NPPM_ISDARKMODEENABLED) != 0;
+        const int *palette = dark ? kDarkColors : kLightColors;
+        int alpha = dark ? 70 : 130;
+        int fg = rgbToSci((int)sci(SCI_STYLEGETFORE, STYLE_DEFAULT));  // BGR→RGB
+        int bg = rgbToSci((int)sci(SCI_STYLEGETBACK, STYLE_DEFAULT));  // (symmetric)
+        opt.defaultFg = fg;
+        opt.defaultBg = bg;
+        for (int i = 0; i < 12; i++) {
+            int blended = 0;
+            for (int shift = 0; shift <= 16; shift += 8) {
+                int pc = (palette[i] >> shift) & 0xFF, bc = (bg >> shift) & 0xFF;
+                blended |= ((pc * alpha + bc * (255 - alpha)) / 255) << shift;
+            }
+            opt.columnColors.push_back({fg, blended});
+        }
+    }
 
     std::string text = documentText();
     std::string out;
@@ -847,6 +872,7 @@ void csvPanelConvertData(void) {
     switch (type) {
         case 1:  out = CsvConvert::ToXML(text, csvdef, opt);  lang = 9;  break;  // L_XML
         case 2:  out = CsvConvert::ToJSON(text, csvdef, opt); lang = 57; break;  // L_JSON
+        case 3:  out = CsvConvert::ToHTML(text, csvdef, opt); lang = 8;  break;  // L_HTML
         default: out = CsvConvert::ToSQL(text, csvdef, opt);  lang = 17; break;  // L_SQL
     }
 
@@ -855,7 +881,9 @@ void csvPanelConvertData(void) {
     __block bool applyLang = (long)out.size() < csvSettings().AutoSyntaxLimit;
     newFileThen(^{
         setDocumentText(outCopy);
-        if (applyLang) npp(NPPM_SETCURRENTLANGTYPE, 0, langCopy);
+        // NPPM_SETCURRENTLANGTYPE is a no-op on this host; set by buffer id.
+        if (applyLang)
+            npp(NPPM_SETBUFFERLANGTYPE, (uintptr_t)npp(NPPM_GETCURRENTBUFFERID), langCopy);
     });
 }
 
@@ -898,7 +926,9 @@ void csvPanelGenerateMetadata(void) {
     __block bool applyLang = lang != 0 && (long)out.size() < csvSettings().AutoSyntaxLimit;
     newFileThen(^{
         setDocumentText(outCopy);
-        if (applyLang) npp(NPPM_SETCURRENTLANGTYPE, 0, langCopy);
+        // NPPM_SETCURRENTLANGTYPE is a no-op on this host; set by buffer id.
+        if (applyLang)
+            npp(NPPM_SETBUFFERLANGTYPE, (uintptr_t)npp(NPPM_GETCURRENTBUFFERID), langCopy);
     });
 }
 

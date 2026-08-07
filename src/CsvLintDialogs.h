@@ -29,9 +29,10 @@ bool csvDlgDetectColumns(char &sep, std::string &widths, bool &header, int &skip
 /// ColumnsSelectForm: ordered selection of column indexes.
 bool csvDlgSelectColumns(const CsvDefinition &csvdef, std::vector<int> &selIdx);
 
-/// DataConvertForm: type 0=SQL 1=XML 2=JSON + table name + SQL dialect+batch.
+/// DataConvertForm: type 0=SQL 1=XML 2=JSON 3=HTML + table name + SQL dialect
+/// + batch size + HTML CSS style (0=none..4=CSV Lint colors).
 bool csvDlgDataConvert(int &convertType, std::string &tableName, int &sqlDialect,
-                       int &batchSize);
+                       int &batchSize, int &cssStyle);
 
 /// MetaDataGenerateForm: 0=schema.ini 1=schema JSON 2=datadictionary CSV
 /// 3=Python 4=R-script 5=PowerShell.

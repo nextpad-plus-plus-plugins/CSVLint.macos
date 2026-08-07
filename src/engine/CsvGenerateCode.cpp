@@ -370,8 +370,8 @@ std::string CsvGenerateCode::PythonPanda(CsvDefinition &csvdef, const CsvGenerat
     sb += "#merged_df = pd.merge(df1, df2, how='left', on='patient_id') # same key column name\r\n";
     sb += "#merged_df = pd.merge(df1, df2, how='left', left_on='df1 key', right_on='df2 id') # different key column names\r\n\r\n";
 
+    ScriptHeader(sb, "Export new csv");
     if (csvdef.Separator == '\0') separator = ",";
-    sb += "# csv write new output\r\n";
     sb += "filenew = \"output.txt\"\r\n";
     sb += "df.to_csv(filenew, sep='" + separator +
           "', decimal=',', na_rep='', header=True, index=False, encoding='utf-8')\r\n";
@@ -518,7 +518,7 @@ std::string CsvGenerateCode::RScript(CsvDefinition &csvdef, const CsvGenerateOpt
     sb += "#merged_df <- merge(df1, df2, all.x=TRUE, by=c('patient_id')) # same key column name\r\n";
     sb += "#merged_df <- merge(df1, df2, all.x=TRUE, by.x=c('df1 key'), by.y=c('df2 id')) # different key column name\r\n\r\n";
 
-    sb += "# csv write new output\r\n";
+    ScriptHeader(sb, "Export new csv");
     sb += "filenew = \"output.txt\"\r\n";
     sb += "write.table(df, file=filenew, sep=\";\", dec=\",\", na=\"\", row.names=FALSE)\r\n";
 
@@ -716,7 +716,7 @@ std::string CsvGenerateCode::PowerShell(CsvDefinition &csvdef, const CsvGenerate
     sb += "##Install-Module -Name Join-Object\r\n";
     sb += "##$merged_df = Join-Object -Left $patients -Right $visits -LeftJoinProperty 'PATIENT_ID' -RightJoinProperty 'PATIENT_ID' -ExcludeRightProperties 'Junk' -Prefix 'R_' | Format-Table\r\n\r\n";
 
-    sb += "# csv write new output\r\n";
+    ScriptHeader(sb, "Export new csv");
     sb += "$filenew = $pathname + \"output.txt\"\r\n";
     sb += "$csvnew | Export-Csv -Path $filenew -Encoding utf8 -Delimiter \"`t\" -NoTypeInformation\r\n\r\n";
 
