@@ -20,7 +20,18 @@
 #include <cstring>
 
 #define PLUGIN_NAME    "CSV Lint"
-#define PLUGIN_VERSION "1.0.1"
+#define PLUGIN_VERSION "1.0.2"
+
+// NPPM_DMM_SETPANELINFO (host ≥ 1.1.0) — not yet present in this repo's
+// bundled NppPluginInterfaceMac.h; local copy matches the host header. On
+// older hosts the message returns 0 and is simply ignored.
+#ifndef NPPM_DMM_SETPANELINFO
+typedef struct NppPanelInfo {
+    const char *moduleName;   /* plugin folder/module name */
+    int32_t     cmdIndex;     /* FuncItem index of the show/toggle command */
+} NppPanelInfo;
+#define NPPM_DMM_SETPANELINFO (NPPMSG + 505)
+#endif
 static const int NB_FUNC = 11;
 
 static NppData  nppData;
@@ -78,6 +89,15 @@ static void toggleLintWindow() {
                          (uintptr_t)(__bridge void *)sPanelView,
                          (intptr_t)"CSV Lint");
         if (h > 0) g_panelHandle = (uint64_t)h;
+        if (g_panelHandle) {
+            // Declare restore metadata so the host reopens the panel at the
+            // next launch (if visible at quit) by invoking "CSV Lint window"
+            // (cmdIndex 0 — this toggle itself, a plain show/hide).
+            NppPanelInfo info;
+            info.moduleName = "CSVLint";
+            info.cmdIndex   = 0;
+            npp(NPPM_DMM_SETPANELINFO, (uintptr_t)g_panelHandle, (intptr_t)&info);
+        }
     }
     if (g_panelHandle == 0) { notImplemented("CSV Lint window (docking unavailable)"); return; }
 
